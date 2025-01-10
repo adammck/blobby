@@ -6,6 +6,19 @@ if you need this for real.
 
 ## Usage
 
+Set connection vars:
+
+```console
+$ export MONGO_URL="mongodb+srv://user:pass@localhost:27017"
+```
+
+Initialize the datastore(s):
+
+```console
+$ ./archive init
+OK
+```
+
 Write some stuff to the memtable:
 
 ```console
