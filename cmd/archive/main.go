@@ -188,6 +188,110 @@ func (a *Archive) getFromMongo(ctx context.Context, key string) (*Record, error)
 	return &rec, nil
 }
 
+func (a *Archive) Flush(ctx context.Context) (string, int, error) {
+	db, err := a.getMongo(ctx)
+	if err != nil {
+		return "", 0, fmt.Errorf("getMongo: %s", err)
+	}
+
+	// TODO: check whether old sstable is still flushing
+	prev, err := a.swapMemtable(ctx, db)
+	if err != nil {
+		return "", 0, fmt.Errorf("switchMemtable: %s", err)
+	}
+
+	return a.flush(ctx, db, prev)
+}
+
+func (a *Archive) swapMemtable(ctx context.Context, m *mongo.Database) (string, error) {
+	curr, err := a.activeMemtableName(ctx, m)
+	if err != nil {
+		return "", err
+	}
+
+	next := blueMemtableName
+	if curr == blueMemtableName {
+		next = greenMemtableName
+	}
+
+	_, err = m.Collection(metaCollectionName).UpdateOne(
+		ctx,
+		bson.M{"_id": metaActiveMemtableDocID},
+		bson.M{"$set": bson.M{"value": next}},
+	)
+	if err != nil {
+		return "", fmt.Errorf("error updating active memtable: %w", err)
+	}
+
+	return curr, nil
+}
+
+func (a *Archive) flush(ctx context.Context, db *mongo.Database, memtable string) (string, int, error) {
+	coll := db.Collection(memtable)
+
+	cur, err := coll.Find(ctx, bson.M{})
+	if err != nil {
+		return "", 0, fmt.Errorf("Find: %w", err)
+	}
+	defer cur.Close(ctx)
+
+	f, err := os.CreateTemp("", "sstable-*")
+	if err != nil {
+		return "", 0, fmt.Errorf("CreateTemp: %w", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	w, err := NewSSTableWriter(f)
+	if err != nil {
+		return "", 0, fmt.Errorf("NewSSTableWriter: %w", err)
+	}
+
+	n := 0
+	for cur.Next(ctx) {
+		var rec Record
+		err = cur.Decode(&rec)
+		if err != nil {
+			return "", 0, fmt.Errorf("Decode: %w", err)
+		}
+
+		err = w.Write(&rec)
+		if err != nil {
+			return "", 0, fmt.Errorf("Write: %w", err)
+		}
+		n++
+	}
+
+	err = cur.Err()
+	if err != nil {
+		return "", 0, fmt.Errorf("cursor error: %w", err)
+	}
+
+	_, err = f.Seek(0, 0)
+	if err != nil {
+		return "", 0, fmt.Errorf("Seek: %w", err)
+	}
+
+	k := fmt.Sprintf("L1/%d.sstable", time.Now().Unix())
+	_, err = a.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: &a.bucket,
+		Key:    &k,
+		Body:   f,
+	})
+	if err != nil {
+		return "", 0, fmt.Errorf("PutObject: %w", err)
+	}
+
+	// TODO: recreate collection and indices here.
+	err = coll.Drop(ctx)
+	if err != nil {
+		return "", 0, fmt.Errorf("Drop: %w", err)
+	}
+
+	fn := fmt.Sprintf("s3://%s/%s", a.bucket, k)
+	return fn, n, nil
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -229,7 +333,7 @@ func main() {
 	case "get":
 		cmdGet(ctx, arc, os.Args[2])
 	case "flush":
-		panic("not implemented")
+		cmdFlush(ctx, arc)
 	default:
 		log.Fatalf("Unknown command: %s", cmd)
 	}
@@ -338,4 +442,13 @@ func cmdGet(ctx context.Context, arc *Archive, key string) {
 	}
 
 	fmt.Printf("%s\n", out)
+}
+
+func cmdFlush(ctx context.Context, arc *Archive) {
+	fn, n, err := arc.Flush(ctx)
+	if err != nil {
+		log.Fatalf("Flush: %s", err)
+	}
+
+	fmt.Printf("Flushed %d documents to: %s", n, fn)
 }
