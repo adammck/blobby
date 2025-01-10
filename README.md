@@ -10,6 +10,7 @@ Set connection vars:
 
 ```console
 $ export MONGO_URL="mongodb+srv://user:pass@localhost:27017"
+$ export S3_BUCKET="bucket-whatever"
 ```
 
 Initialize the datastore(s):

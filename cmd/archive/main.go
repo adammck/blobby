@@ -33,6 +33,7 @@ type Record struct {
 
 type Archive struct {
 	mongoURL string
+	bucket   string
 
 	mongo *mongo.Database
 	s3    *s3.Client
@@ -90,9 +91,10 @@ func connectToS3(ctx context.Context) (*s3.Client, error) {
 	return s3.NewFromConfig(cfg), nil
 }
 
-func NewArchive(mongoURL string) *Archive {
+func NewArchive(mongoURL, bucket string) *Archive {
 	return &Archive{
 		mongoURL: mongoURL,
+		bucket:   bucket,
 	}
 }
 
@@ -202,7 +204,12 @@ func main() {
 		log.Fatalf("Required: MONGO_URL")
 	}
 
-	arc := NewArchive(mongoURL)
+	bucket := os.Getenv("S3_BUCKET")
+	if bucket == "" {
+		log.Fatalf("Required: S3_BUCKET")
+	}
+
+	arc := NewArchive(mongoURL, bucket)
 
 	_, err := arc.getMongo(ctx)
 	if err != nil {
