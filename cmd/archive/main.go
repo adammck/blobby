@@ -249,10 +249,30 @@ func cmdInit(ctx context.Context, arc *Archive) {
 	if err != nil {
 		log.Fatalf("CreateCollection: %s", err)
 	}
+	cb := db.Collection(blueMemtableName)
+	_, err = cb.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "key", Value: 1},
+			{Key: "ts", Value: -1},
+		},
+	})
+	if err != nil {
+		log.Fatalf("CreateIndex (blue): %s", err)
+	}
 
 	err = db.CreateCollection(ctx, greenMemtableName)
 	if err != nil {
 		log.Fatalf("CreateCollection: %s", err)
+	}
+	cg := db.Collection(greenMemtableName)
+	_, err = cg.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "key", Value: 1},
+			{Key: "ts", Value: -1},
+		},
+	})
+	if err != nil {
+		log.Fatalf("CreateIndex (green): %s", err)
 	}
 
 	fmt.Println("OK")
