@@ -260,11 +260,10 @@ func cmdInit(ctx context.Context, arc *Archive) {
 
 func cmdPut(ctx context.Context, arc *Archive, r io.Reader) {
 	n := 0
-
 	dec := json.NewDecoder(r)
 	for {
-		var raw json.RawMessage
-		err := dec.Decode(&raw)
+		var doc map[string]interface{}
+		err := dec.Decode(&doc)
 		if err == io.EOF {
 			break
 		}
@@ -272,7 +271,18 @@ func cmdPut(ctx context.Context, arc *Archive, r io.Reader) {
 			log.Fatalf("Decode: %s", err)
 		}
 
-		err = arc.Put(ctx, "1", raw)
+		id, ok := doc["_id"]
+		if !ok {
+			log.Fatalf("Document missing _id field")
+		}
+		k := fmt.Sprintf("%v", id)
+
+		b, err := bson.Marshal(doc)
+		if err != nil {
+			log.Fatalf("bson.Marshal: %s", err)
+		}
+
+		err = arc.Put(ctx, k, b)
 		if err != nil {
 			log.Fatalf("Put: %s", err)
 		}
@@ -289,5 +299,16 @@ func cmdGet(ctx context.Context, arc *Archive, key string) {
 		log.Fatalf("Get: %s", err)
 	}
 
-	fmt.Printf("%s\n", b)
+	o := map[string]interface{}{}
+	err = bson.Unmarshal(b, &o)
+	if err != nil {
+		log.Fatalf("bson.Unmarshal: %s", err)
+	}
+
+	out, err := json.Marshal(o)
+	if err != nil {
+		log.Fatalf("json.Marshal: %s", err)
+	}
+
+	fmt.Printf("%s\n", out)
 }

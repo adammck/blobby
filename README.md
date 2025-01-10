@@ -50,7 +50,7 @@ Got 1 document from s3://bucket-whatever/L1/1736476581.sstable
 Write a new version of that document:
 
 ```console
-$ ./archive put '{"_id": 2, "name": "bulbasaur", "trainer": "ash"}'
+$ echo '{"_id": 2, "name": "bulbasaur", "trainer": "ash"}' | ./archive put
 Wrote 1 document to mongodb://localhost:27017/db-whatever/green
 ```
 
