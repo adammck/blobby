@@ -84,3 +84,26 @@ func (s *Store) Insert(ctx context.Context, meta *sstable.Meta) error {
 
 	return nil
 }
+
+func (s *Store) GetContaining(ctx context.Context, key string) ([]*sstable.Meta, error) {
+	db, err := s.getMongo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getMongo: %w", err)
+	}
+
+	cursor, err := db.Collection(collectionName).Find(ctx, bson.M{
+		"min_key": bson.M{"$lte": key},
+		"max_key": bson.M{"$gte": key},
+	}, options.Find().SetSort(bson.D{{Key: "created", Value: -1}}))
+	if err != nil {
+		return nil, fmt.Errorf("Find: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var metas []*sstable.Meta
+	if err := cursor.All(ctx, &metas); err != nil {
+		return nil, fmt.Errorf("cursor.All: %w", err)
+	}
+
+	return metas, nil
+}

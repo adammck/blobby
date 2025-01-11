@@ -1,6 +1,9 @@
 package sstable
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type Meta struct {
 	MinKey  string    `bson:"min_key"`
@@ -8,4 +11,8 @@ type Meta struct {
 	Count   int       `bson:"count"`
 	Size    int64     `bson:"size"`
 	Created time.Time `bson:"created"`
+}
+
+func (m *Meta) Filename() string {
+	return fmt.Sprintf("%d.sstable", m.Created.Unix())
 }

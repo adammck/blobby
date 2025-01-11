@@ -36,16 +36,32 @@ func (a *Archive) Put(ctx context.Context, key string, value []byte) error {
 	return a.mt.Put(ctx, key, value)
 }
 
-func (a *Archive) Get(ctx context.Context, key string) ([]byte, error) {
+func (a *Archive) Get(ctx context.Context, key string) ([]byte, string, error) {
 	rec, err := a.mt.Get(ctx, key)
 	if err != nil {
-		return nil, err
+		return nil, "", fmt.Errorf("memtable.Get: %w", err)
 	}
 	if rec != nil {
-		return rec.Document, nil
+		return rec.Document, "memtable", nil
 	}
 
-	panic("s3 not implemented")
+	metas, err := a.md.GetContaining(ctx, key)
+	if err != nil {
+		return nil, "", fmt.Errorf("metadata.GetContaining: %w", err)
+	}
+
+	for _, meta := range metas {
+		rec, src, err := a.bs.Get(ctx, meta.Filename(), key)
+		if err != nil {
+			return nil, "", fmt.Errorf("blobstore.Get: %w", err)
+		}
+		if rec != nil {
+			return rec.Document, src, nil
+		}
+	}
+
+	// key not found
+	return nil, "", nil
 }
 
 func (a *Archive) Flush(ctx context.Context) (string, int, string, error) {
@@ -196,7 +212,7 @@ func cmdPut(ctx context.Context, arc *Archive, r io.Reader) {
 }
 
 func cmdGet(ctx context.Context, arc *Archive, key string) {
-	b, err := arc.Get(ctx, key)
+	b, src, err := arc.Get(ctx, key)
 	if err != nil {
 		log.Fatalf("Get: %s", err)
 	}
@@ -212,6 +228,7 @@ func cmdGet(ctx context.Context, arc *Archive, key string) {
 		log.Fatalf("json.Marshal: %s", err)
 	}
 
+	fmt.Fprintf(os.Stderr, "Got 1 record from: %s\n", src)
 	fmt.Printf("%s\n", out)
 }
 
