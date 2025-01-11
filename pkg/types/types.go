@@ -1,9 +1,12 @@
 package types
 
 import (
-	"time"
-	"go.mongodb.org/mongo-driver/bson"
+	"encoding/binary"
+	"errors"
 	"io"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 type Record struct {
@@ -19,4 +22,46 @@ func (r *Record) Write(out io.Writer) (int, error) {
 	}
 
 	return out.Write(b)
+}
+
+func Read(r io.Reader) (*Record, error) {
+	b, err := readOne(r)
+	if err != nil {
+		if err == io.EOF {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	rec := &Record{}
+	if err := bson.Unmarshal(b, rec); err != nil {
+		return nil, err
+	}
+
+	return rec, nil
+}
+
+func readOne(r io.Reader) ([]byte, error) {
+	// see: https://bsonspec.org/spec.html
+
+	var sizeBytes [4]byte
+	if _, err := io.ReadFull(r, sizeBytes[:]); err != nil {
+		if err == io.EOF {
+			return nil, io.EOF
+		}
+		return nil, err
+	}
+
+	size := int(binary.LittleEndian.Uint32(sizeBytes[:]))
+	if size < 5 {
+		return nil, errors.New("invalid BSON document length")
+	}
+
+	docBytes := make([]byte, size)
+	copy(docBytes[0:4], sizeBytes[:])
+	if _, err := io.ReadFull(r, docBytes[4:]); err != nil {
+		return nil, err
+	}
+
+	return docBytes, nil
 }
