@@ -11,6 +11,8 @@ import (
 
 	"github.com/adammck/archive/pkg/blobstore"
 	"github.com/adammck/archive/pkg/memtable"
+	"github.com/adammck/archive/pkg/metadata"
+	"github.com/adammck/archive/pkg/sstable"
 	"github.com/adammck/archive/pkg/types"
 	"go.mongodb.org/mongo-driver/bson"
 	"golang.org/x/sync/errgroup"
@@ -19,12 +21,14 @@ import (
 type Archive struct {
 	mt *memtable.Memtable
 	bs *blobstore.Blobstore
+	md *metadata.Store
 }
 
 func NewArchive(mongoURL, bucket string) *Archive {
 	return &Archive{
 		mt: memtable.New(mongoURL),
 		bs: blobstore.New(bucket),
+		md: metadata.New(mongoURL),
 	}
 }
 
@@ -66,10 +70,11 @@ func (a *Archive) Flush(ctx context.Context) (string, int, string, error) {
 
 	var fn string
 	var n int
+	var meta *sstable.Meta
 
 	g.Go(func() error {
 		var err error
-		fn, n, err = a.bs.Flush(ctx2, ch)
+		fn, n, meta, err = a.bs.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}
@@ -79,6 +84,11 @@ func (a *Archive) Flush(ctx context.Context) (string, int, string, error) {
 	err = g.Wait()
 	if err != nil {
 		return "", 0, "", err
+	}
+
+	err = a.md.Insert(ctx, meta)
+	if err != nil {
+		return "", 0, "", fmt.Errorf("metadata.Insert: %w", err)
 	}
 
 	err = handle.Truncate(ctx)
@@ -139,7 +149,12 @@ func main() {
 func cmdInit(ctx context.Context, arc *Archive) {
 	err := arc.mt.Init(ctx)
 	if err != nil {
-		log.Fatalf("getMongo: %s", err)
+		log.Fatalf("memtable.Init: %s", err)
+	}
+
+	err = arc.md.Init(ctx)
+	if err != nil {
+		log.Fatalf("metadata.Init: %s", err)
 	}
 
 	fmt.Println("OK")

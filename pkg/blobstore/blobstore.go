@@ -44,52 +44,50 @@ func (bs *Blobstore) Init(ctx context.Context) error {
 
 var NoRecords = errors.New("NoRecords")
 
-func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (string, int, error) {
+func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (string, int, *sstable.Meta, error) {
 	f, err := os.CreateTemp("", "sstable-*")
 	if err != nil {
-		return "", 0, fmt.Errorf("CreateTemp: %w", err)
+		return "", 0, nil, fmt.Errorf("CreateTemp: %w", err)
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
 
 	w, err := sstable.NewWriter(f)
 	if err != nil {
-		return "", 0, fmt.Errorf("sstable.NewWriter: %w", err)
+		return "", 0, nil, fmt.Errorf("sstable.NewWriter: %w", err)
 	}
 
 	n := 0
-
 	for rec := range ch {
 		err = w.Write(rec)
 		if err != nil {
-			return "", 0, fmt.Errorf("Write: %w", err)
+			return "", 0, nil, fmt.Errorf("Write: %w", err)
 		}
-
 		n++
 	}
 
-	// nothing to write.
+	// nothing to write
 	if n == 0 {
-		return "", 0, NoRecords
+		return "", 0, nil, NoRecords
 	}
 
 	_, err = f.Seek(0, 0)
 	if err != nil {
-		return "", 0, fmt.Errorf("Seek: %w", err)
+		return "", 0, nil, fmt.Errorf("Seek: %w", err)
 	}
 
-	k := fmt.Sprintf("L1/%d.sstable", time.Now().Unix())
+	key := fmt.Sprintf("L1/%d.sstable", time.Now().Unix())
 	_, err = bs.s3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: &bs.bucket,
-		Key:    &k,
+		Key:    &key,
 		Body:   f,
 	})
 	if err != nil {
-		return "", 0, fmt.Errorf("PutObject: %w", err)
+		return "", 0, nil, fmt.Errorf("PutObject: %w", err)
 	}
 
-	fn := fmt.Sprintf("s3://%s/%s", bs.bucket, k)
-	return fn, n, nil
+	fn := fmt.Sprintf("s3://%s/%s", bs.bucket, key)
+	return fn, n, w.Meta(), nil
 }
 
 func (bs *Blobstore) getS3(ctx context.Context) (*s3.Client, error) {
