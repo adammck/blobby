@@ -3,6 +3,7 @@ package sstable
 import (
 	"fmt"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/adammck/archive/pkg/types"
@@ -10,50 +11,57 @@ import (
 )
 
 type Writer struct {
-	w    io.Writer
-	meta *Meta
+	records []*types.Record
 }
 
-func NewWriter(w io.Writer) (*Writer, error) {
-	_, err := w.Write([]byte(magicBytes))
+func NewWriter() *Writer {
+	return &Writer{}
+}
+
+func (w *Writer) Add(record *types.Record) error {
+	w.records = append(w.records, record)
+	return nil
+}
+
+func (w *Writer) Write(out io.Writer) (*Meta, error) {
+	sort.Slice(w.records, func(i, j int) bool {
+		return w.records[i].Key < w.records[j].Key
+	})
+
+	_, err := out.Write([]byte(magicBytes))
 	if err != nil {
 		return nil, err
 	}
 
-	return &Writer{
-		w: w,
-		meta: &Meta{
-			Created: time.Now(),
-			Size:    int64(len(magicBytes)),
-		},
-	}, nil
-}
-
-func (w *Writer) Write(record *types.Record) error {
-	b, err := bson.Marshal(record)
-	if err != nil {
-		return fmt.Errorf("encode record: %w", err)
+	m := &Meta{
+		Created: time.Now(),
+		Size:    int64(len(magicBytes)),
 	}
 
-	_, err = w.w.Write(b)
-	if err != nil {
-		return fmt.Errorf("Write: %w", err)
+	for _, record := range w.records {
+
+		// todo: move marshalling/writing to Record
+		b, err := bson.Marshal(record)
+		if err != nil {
+			return nil, fmt.Errorf("encode record: %w", err)
+		}
+
+		_, err = out.Write(b)
+		if err != nil {
+			return nil, fmt.Errorf("Write: %w", err)
+		}
+
+		m.Count++
+		m.Size += int64(len(b))
+
+		if m.MinKey == "" || record.Key < m.MinKey {
+			m.MinKey = record.Key
+		}
+
+		if m.MaxKey == "" || record.Key > m.MaxKey {
+			m.MaxKey = record.Key
+		}
 	}
 
-	w.meta.Count++
-	w.meta.Size += int64(len(b))
-
-	if w.meta.MinKey == "" || record.Key < w.meta.MinKey {
-		w.meta.MinKey = record.Key
-	}
-
-	if w.meta.MaxKey == "" || record.Key > w.meta.MaxKey {
-		w.meta.MaxKey = record.Key
-	}
-
-	return nil
-}
-
-func (w *Writer) Meta() *Meta {
-	return w.meta
+	return m, nil
 }

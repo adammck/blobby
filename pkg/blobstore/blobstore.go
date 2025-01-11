@@ -92,14 +92,11 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (string, 
 	defer os.Remove(f.Name())
 	defer f.Close()
 
-	w, err := sstable.NewWriter(f)
-	if err != nil {
-		return "", 0, nil, fmt.Errorf("sstable.NewWriter: %w", err)
-	}
+	w := sstable.NewWriter()
 
 	n := 0
 	for rec := range ch {
-		err = w.Write(rec)
+		err = w.Add(rec)
 		if err != nil {
 			return "", 0, nil, fmt.Errorf("Write: %w", err)
 		}
@@ -116,7 +113,12 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (string, 
 		return "", 0, nil, fmt.Errorf("Seek: %w", err)
 	}
 
-	key := w.Meta().Filename()
+	meta, err := w.Write(f)
+	if err != nil {
+		return "", 0, nil, fmt.Errorf("sstable.Write: %w", err)
+	}
+
+	key := meta.Filename()
 	_, err = bs.s3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: &bs.bucket,
 		Key:    &key,
@@ -126,7 +128,7 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (string, 
 		return "", 0, nil, fmt.Errorf("PutObject: %w", err)
 	}
 
-	return bs.url(key), n, w.Meta(), nil
+	return bs.url(key), n, meta, nil
 }
 
 func (bs *Blobstore) url(key string) string {
