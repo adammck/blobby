@@ -31,10 +31,10 @@ func New(mongoURL string) *Memtable {
 	}
 }
 
-func (mt *Memtable) Get(ctx context.Context, key string) (*types.Record, error) {
+func (mt *Memtable) Get(ctx context.Context, key string) (*types.Record, string, error) {
 	c, err := mt.activeCollection(ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	res := c.FindOne(ctx, bson.M{"key": key}, options.FindOne().SetSort(bson.M{"ts": -1}))
@@ -44,25 +44,36 @@ func (mt *Memtable) Get(ctx context.Context, key string) (*types.Record, error) 
 
 		// this is actually fine
 		if err == mongo.ErrNoDocuments {
-			return nil, nil
+			return nil, "", nil
 		}
 
-		return nil, fmt.Errorf("FindOne: %w", err)
+		return nil, "", fmt.Errorf("FindOne: %w", err)
 	}
 
 	var rec types.Record
 	err = bson.Unmarshal(b, &rec)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding record: %w", err)
+		return nil, "", fmt.Errorf("error decoding record: %w", err)
 	}
 
-	return &rec, nil
+	return &rec, mt.url(c.Name()), nil
 }
 
-func (mt *Memtable) Put(ctx context.Context, key string, value []byte) error {
+func (mt *Memtable) url(coll string) string {
+	u, err := url.Parse(mt.mongoURL)
+	if err != nil {
+		// extremely weird if this happens
+		// TODO: move the parse to constructor
+		return "error://error/error"
+	}
+
+	return fmt.Sprintf("%s://%s/%s/%s", u.Scheme, u.Host, mt.mongo.Name(), coll)
+}
+
+func (mt *Memtable) Put(ctx context.Context, key string, value []byte) (string, error) {
 	c, err := mt.activeCollection(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	_, err = c.InsertOne(ctx, &types.Record{
@@ -71,7 +82,7 @@ func (mt *Memtable) Put(ctx context.Context, key string, value []byte) error {
 		Document:  value,
 	})
 
-	return err
+	return mt.url(c.Name()), err
 }
 
 func (mt *Memtable) Ping(ctx context.Context) error {
@@ -220,16 +231,7 @@ func (mt *Memtable) Swap(ctx context.Context) (*Handle, string, error) {
 		return nil, "", fmt.Errorf("error updating active memtable: %w", err)
 	}
 
-	u, err := url.Parse(mt.mongoURL)
-	if err != nil {
-		// extremely weird if this happens
-		return nil, "", fmt.Errorf("url.Parse: %w", err)
-	}
-
-	//desc := "mongodb://localhost:27017/db-whatever/green"
-	desc := fmt.Sprintf("%s://%s/%s/%s", u.Scheme, u.Host, db.Name(), next)
-
 	return &Handle{
 		coll: db.Collection(curr),
-	}, desc, nil
+	}, mt.url(next), nil
 }

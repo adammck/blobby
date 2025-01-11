@@ -41,7 +41,7 @@ func (bs *Blobstore) Get(ctx context.Context, fn string, key string) (*types.Rec
 		}
 		// TODO: index the file so we can grab a range
 		if rec.Key == key {
-			return rec, bs.URL(fn), nil
+			return rec, bs.url(fn), nil
 		}
 	}
 }
@@ -126,10 +126,10 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (string, 
 		return "", 0, nil, fmt.Errorf("PutObject: %w", err)
 	}
 
-	return bs.URL(key), n, w.Meta(), nil
+	return bs.url(key), n, w.Meta(), nil
 }
 
-func (bs *Blobstore) URL(key string) string {
+func (bs *Blobstore) url(key string) string {
 	return fmt.Sprintf("s3://%s/%s", bs.bucket, key)
 }
 

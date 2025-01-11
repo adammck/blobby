@@ -32,17 +32,17 @@ func NewArchive(mongoURL, bucket string) *Archive {
 	}
 }
 
-func (a *Archive) Put(ctx context.Context, key string, value []byte) error {
+func (a *Archive) Put(ctx context.Context, key string, value []byte) (string, error) {
 	return a.mt.Put(ctx, key, value)
 }
 
 func (a *Archive) Get(ctx context.Context, key string) ([]byte, string, error) {
-	rec, err := a.mt.Get(ctx, key)
+	rec, src, err := a.mt.Get(ctx, key)
 	if err != nil {
 		return nil, "", fmt.Errorf("memtable.Get: %w", err)
 	}
 	if rec != nil {
-		return rec.Document, "memtable", nil
+		return rec.Document, src, nil
 	}
 
 	metas, err := a.md.GetContaining(ctx, key)
@@ -178,6 +178,7 @@ func cmdInit(ctx context.Context, arc *Archive) {
 
 func cmdPut(ctx context.Context, arc *Archive, r io.Reader) {
 	n := 0
+	var dest string
 	dec := json.NewDecoder(r)
 	for {
 		var doc map[string]interface{}
@@ -200,7 +201,7 @@ func cmdPut(ctx context.Context, arc *Archive, r io.Reader) {
 			log.Fatalf("bson.Marshal: %s", err)
 		}
 
-		err = arc.Put(ctx, k, b)
+		dest, err = arc.Put(ctx, k, b)
 		if err != nil {
 			log.Fatalf("Put: %s", err)
 		}
@@ -208,7 +209,7 @@ func cmdPut(ctx context.Context, arc *Archive, r io.Reader) {
 		n += 1
 	}
 
-	fmt.Printf("Wrote %d documents\n", n)
+	fmt.Printf("Wrote %d documents to: %s\n", n, dest)
 }
 
 func cmdGet(ctx context.Context, arc *Archive, key string) {
