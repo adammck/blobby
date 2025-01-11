@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/adammck/archive/pkg/types"
-	"go.mongodb.org/mongo-driver/bson"
 )
 
 type Writer struct {
@@ -39,20 +38,13 @@ func (w *Writer) Write(out io.Writer) (*Meta, error) {
 	}
 
 	for _, record := range w.records {
-
-		// todo: move marshalling/writing to Record
-		b, err := bson.Marshal(record)
+		n, err := record.Write(out)
 		if err != nil {
-			return nil, fmt.Errorf("encode record: %w", err)
-		}
-
-		_, err = out.Write(b)
-		if err != nil {
-			return nil, fmt.Errorf("Write: %w", err)
+			return nil, fmt.Errorf("write record: %w", err)
 		}
 
 		m.Count++
-		m.Size += int64(len(b))
+		m.Size += int64(n)
 
 		if m.MinKey == "" || record.Key < m.MinKey {
 			m.MinKey = record.Key
