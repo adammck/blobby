@@ -1,52 +1,20 @@
-package main
+package sstable
 
 import (
 	"errors"
 	"fmt"
 	"io"
 
+	"github.com/adammck/archive/pkg/types"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-const (
-	magicBytes = "\x6D\x75\x64\x6B\x69\x70\x73" // mudkips
-)
-
-type SSTableWriter struct {
-	w io.Writer
-}
-
-func NewSSTableWriter(w io.Writer) (*SSTableWriter, error) {
-	_, err := w.Write([]byte(magicBytes))
-	if err != nil {
-		return nil, err
-	}
-
-	return &SSTableWriter{
-		w: w,
-	}, nil
-}
-
-func (w *SSTableWriter) Write(record *Record) error {
-	b, err := bson.Marshal(record)
-	if err != nil {
-		return fmt.Errorf("encode record: %w", err)
-	}
-
-	_, err = w.w.Write(b)
-	if err != nil {
-		return fmt.Errorf("Write: %w", err)
-	}
-
-	return nil
-}
-
-type SSTableReader struct {
+type Reader struct {
 	r   io.Reader
 	dec *bson.Decoder
 }
 
-func NewSSTableReader(r io.Reader) (*SSTableReader, error) {
+func NewReader(r io.Reader) (*Reader, error) {
 	magic := make([]byte, len(magicBytes))
 	if _, err := io.ReadFull(r, magic); err != nil {
 		return nil, fmt.Errorf("read magic bytes: %w", err)
@@ -55,12 +23,12 @@ func NewSSTableReader(r io.Reader) (*SSTableReader, error) {
 		return nil, fmt.Errorf("invalid sstable format")
 	}
 
-	return &SSTableReader{
+	return &Reader{
 		r: r,
 	}, nil
 }
 
-func (r *SSTableReader) Next() (*Record, error) {
+func (r *Reader) Next() (*types.Record, error) {
 	b, err := nextDoc(r.r)
 	if err != nil {
 		if err == io.EOF {
@@ -69,7 +37,7 @@ func (r *SSTableReader) Next() (*Record, error) {
 		return nil, fmt.Errorf("nextDoc: %w", err)
 	}
 
-	rec := Record{}
+	rec := types.Record{}
 	if err := bson.Unmarshal(b, &rec); err != nil {
 		return nil, err
 	}
