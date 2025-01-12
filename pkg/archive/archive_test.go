@@ -1,22 +1,21 @@
-package integrationtest
+package archive
 
 import (
 	"context"
 	"fmt"
 	"testing"
 
-	"github.com/adammck/archive/pkg/archive"
 	"github.com/adammck/archive/pkg/testutil"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 )
 
-func setup(t *testing.T) (context.Context, *testutil.Env, *archive.Archive, clockwork.Clock) {
+func setup(t *testing.T) (context.Context, *testutil.Env, *Archive, clockwork.Clock) {
 	ctx := context.Background()
 	env := testutil.SetupTest(ctx, t)
 
 	clock := clockwork.NewFakeClock()
-	arc := archive.New(env.MongoURL, env.S3Bucket, clock)
+	arc := New(env.MongoURL, env.S3Bucket, clock)
 
 	err := arc.Init(ctx)
 	require.NoError(t, err)
