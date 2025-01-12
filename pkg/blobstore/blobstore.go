@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/adammck/archive/pkg/sstable"
@@ -108,18 +107,23 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (string, 
 		return "", 0, nil, NoRecords
 	}
 
-	_, err = f.Seek(0, 0)
-	if err != nil {
-		return "", 0, nil, fmt.Errorf("Seek: %w", err)
-	}
-
 	meta, err := w.Write(f)
 	if err != nil {
 		return "", 0, nil, fmt.Errorf("sstable.Write: %w", err)
 	}
 
+	_, err = f.Seek(0, 0)
+	if err != nil {
+		return "", 0, nil, fmt.Errorf("Seek: %w", err)
+	}
+
+	s3c, err := bs.getS3(ctx)
+	if err != nil {
+		return "", 0, nil, fmt.Errorf("getS3: %w", err)
+	}
+
 	key := meta.Filename()
-	_, err = bs.s3.PutObject(ctx, &s3.PutObjectInput{
+	_, err = s3c.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: &bs.bucket,
 		Key:    &key,
 		Body:   f,
@@ -152,8 +156,13 @@ func (bs *Blobstore) getS3(ctx context.Context) (*s3.Client, error) {
 func connectToS3(ctx context.Context) (*s3.Client, error) {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
-	return s3.NewFromConfig(cfg), nil
+	return s3.NewFromConfig(cfg, func(o *s3.Options) {
+		// integration test needs this so we can just hit localhost rather than
+		// the default of bucket-name.localhost, which doesn't work. seems fine
+		// to just do this in production too.
+		o.UsePathStyle = true
+	}), nil
 }
