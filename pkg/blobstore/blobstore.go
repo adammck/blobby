@@ -71,10 +71,6 @@ func (bs *Blobstore) getSST(ctx context.Context, key string) (*sstable.Reader, e
 	return reader, nil
 }
 
-func (bs *Blobstore) Put(ctx context.Context, key string, value []byte) error {
-	return fmt.Errorf("not implemented")
-}
-
 func (bs *Blobstore) Ping(ctx context.Context) error {
 	_, err := bs.getS3(ctx)
 	return err
@@ -86,7 +82,7 @@ func (bs *Blobstore) Init(ctx context.Context) error {
 
 var NoRecords = errors.New("NoRecords")
 
-func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (string, int, *sstable.Meta, error) {
+func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (dest string, count int, meta *sstable.Meta, err error) {
 	f, err := os.CreateTemp("", "sstable-*")
 	if err != nil {
 		return "", 0, nil, fmt.Errorf("CreateTemp: %w", err)
@@ -110,7 +106,7 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (string, 
 		return "", 0, nil, NoRecords
 	}
 
-	meta, err := w.Write(f)
+	meta, err = w.Write(f)
 	if err != nil {
 		return "", 0, nil, fmt.Errorf("sstable.Write: %w", err)
 	}
