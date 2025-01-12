@@ -10,16 +10,19 @@ import (
 	"github.com/adammck/archive/pkg/types"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/jonboulle/clockwork"
 )
 
 type Blobstore struct {
 	bucket string
 	s3     *s3.Client
+	clock  clockwork.Clock
 }
 
-func New(bucket string) *Blobstore {
+func New(bucket string, clock clockwork.Clock) *Blobstore {
 	return &Blobstore{
 		bucket: bucket,
+		clock:  clock,
 	}
 }
 
@@ -91,7 +94,7 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (string, 
 	defer os.Remove(f.Name())
 	defer f.Close()
 
-	w := sstable.NewWriter()
+	w := sstable.NewWriter(bs.clock)
 
 	n := 0
 	for rec := range ch {

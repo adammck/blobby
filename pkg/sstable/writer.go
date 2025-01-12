@@ -5,18 +5,21 @@ import (
 	"io"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/adammck/archive/pkg/types"
+	"github.com/jonboulle/clockwork"
 )
 
 type Writer struct {
 	records []*types.Record
 	mu      sync.Mutex
+	clock   clockwork.Clock
 }
 
-func NewWriter() *Writer {
-	return &Writer{}
+func NewWriter(clock clockwork.Clock) *Writer {
+	return &Writer{
+		clock: clock,
+	}
 }
 
 func (w *Writer) Add(record *types.Record) error {
@@ -40,7 +43,7 @@ func (w *Writer) Write(out io.Writer) (*Meta, error) {
 	}
 
 	m := &Meta{
-		Created: time.Now(),
+		Created: w.clock.Now(),
 		Size:    int64(len(magicBytes)),
 	}
 

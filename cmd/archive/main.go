@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/adammck/archive/pkg/archive"
+	"github.com/jonboulle/clockwork"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -34,7 +35,7 @@ func main() {
 		log.Fatalf("Required: S3_BUCKET")
 	}
 
-	arc := archive.New(mongoURL, bucket)
+	arc := archive.New(mongoURL, bucket, clockwork.NewRealClock())
 
 	err := arc.Ping(ctx)
 	if err != nil {

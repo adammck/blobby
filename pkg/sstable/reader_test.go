@@ -29,7 +29,7 @@ func TestReaderNext(t *testing.T) {
 	var buf bytes.Buffer
 	buf.Write([]byte(magicBytes))
 
-	data, err := (&types.Record{Key: "key1", Timestamp: time.Now(), Document: []byte("doc1")}).Write(&buf)
+	data, err := (&types.Record{Key: "key1", Timestamp: time.Time{}, Document: []byte("doc1")}).Write(&buf)
 	require.NoError(t, err)
 	assert.NotZero(t, data)
 

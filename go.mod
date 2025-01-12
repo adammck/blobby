@@ -83,6 +83,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.5 // indirect
 	github.com/aws/smithy-go v1.22.1 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
+	github.com/jonboulle/clockwork v0.5.0
 	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/minio/minio-go v6.0.14+incompatible
 	github.com/minio/minio-go/v7 v7.0.83

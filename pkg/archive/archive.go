@@ -9,20 +9,23 @@ import (
 	"github.com/adammck/archive/pkg/metadata"
 	"github.com/adammck/archive/pkg/sstable"
 	"github.com/adammck/archive/pkg/types"
+	"github.com/jonboulle/clockwork"
 	"golang.org/x/sync/errgroup"
 )
 
 type Archive struct {
-	mt *memtable.Memtable
-	bs *blobstore.Blobstore
-	md *metadata.Store
+	mt    *memtable.Memtable
+	bs    *blobstore.Blobstore
+	md    *metadata.Store
+	clock clockwork.Clock
 }
 
-func New(mongoURL, bucket string) *Archive {
+func New(mongoURL, bucket string, clock clockwork.Clock) *Archive {
 	return &Archive{
-		mt: memtable.New(mongoURL),
-		bs: blobstore.New(bucket),
-		md: metadata.New(mongoURL),
+		mt:    memtable.New(mongoURL, clock),
+		bs:    blobstore.New(bucket, clock),
+		md:    metadata.New(mongoURL),
+		clock: clock,
 	}
 }
 

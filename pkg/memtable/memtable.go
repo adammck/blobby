@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/adammck/archive/pkg/types"
+	"github.com/jonboulle/clockwork"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -23,11 +24,13 @@ const (
 type Memtable struct {
 	mongoURL string
 	mongo    *mongo.Database
+	clock    clockwork.Clock
 }
 
-func New(mongoURL string) *Memtable {
+func New(mongoURL string, clock clockwork.Clock) *Memtable {
 	return &Memtable{
 		mongoURL: mongoURL,
+		clock:    clock,
 	}
 }
 
@@ -78,7 +81,7 @@ func (mt *Memtable) Put(ctx context.Context, key string, value []byte) (string, 
 
 	_, err = c.InsertOne(ctx, &types.Record{
 		Key:       key,
-		Timestamp: time.Now(), // TODO: inject a clock
+		Timestamp: mt.clock.Now(),
 		Document:  value,
 	})
 
