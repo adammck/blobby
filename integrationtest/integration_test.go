@@ -4,25 +4,31 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/adammck/archive/pkg/archive"
+	"github.com/adammck/archive/pkg/testutil"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 )
 
-func newTestArchive(t *testing.T, ctx context.Context) (*archive.Archive, clockwork.Clock) {
-	t.Helper()
-	clock := clockwork.NewFakeClockAt(time.Unix(455968859, 0))
-	arc := archive.New(testEnv.mongoURI, testEnv.s3Bucket, clock)
-	arc.Init(ctx)
-	arc.Ping(ctx)
-	return arc, clock
+func setup(t *testing.T) (context.Context, *testutil.Env, *archive.Archive, clockwork.Clock) {
+	ctx := context.Background()
+	env := testutil.SetupTest(ctx, t)
+
+	clock := clockwork.NewFakeClock()
+	arc := archive.New(env.MongoURL, env.S3Bucket, clock)
+
+	err := arc.Init(ctx)
+	require.NoError(t, err)
+
+	err = arc.Ping(ctx)
+	require.NoError(t, err)
+
+	return ctx, env, arc, clock
 }
 
 func TestBasicWriteRead(t *testing.T) {
-	ctx := context.Background()
-	a, c := newTestArchive(t, ctx)
+	ctx, env, a, c := setup(t)
 
 	doc1 := []byte(`foo`)
 	doc2 := []byte(`bar`)
@@ -36,7 +42,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, src, err := a.Get(ctx, "1")
 	require.NoError(t, err)
 	require.Equal(t, val, doc1)
-	require.Equal(t, src, fmt.Sprintf("%s/archive/blue", testEnv.mongoURI))
+	require.Equal(t, src, fmt.Sprintf("%s/archive/blue", env.MongoURL))
 
 	val, _, err = a.Get(ctx, "2")
 	require.NoError(t, err)
@@ -48,7 +54,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, src, err = a.Get(ctx, "1")
 	require.NoError(t, err)
 	require.Equal(t, val, doc1)
-	require.Equal(t, src, fmt.Sprintf("s3://%s/%d.sstable", testEnv.s3Bucket, c.Now().Unix()))
+	require.Equal(t, src, fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, c.Now().Unix()))
 
 	val, _, err = a.Get(ctx, "2")
 	require.NoError(t, err)
