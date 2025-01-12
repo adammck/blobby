@@ -10,7 +10,15 @@ import (
 )
 
 type Handle struct {
+	db   *mongo.Database
 	coll *mongo.Collection
+}
+
+func NewHandle(db *mongo.Database, name string) *Handle {
+	return &Handle{
+		db:   db,
+		coll: db.Collection(name),
+	}
 }
 
 func (h *Handle) Flush(ctx context.Context, ch chan *types.Record) error {
@@ -44,11 +52,28 @@ func (h *Handle) Flush(ctx context.Context, ch chan *types.Record) error {
 }
 
 func (h *Handle) Truncate(ctx context.Context) error {
-
-	// TODO: recreate collection and indices here.
 	err := h.coll.Drop(ctx)
 	if err != nil {
 		return fmt.Errorf("Drop: %w", err)
+	}
+
+	return h.Create(ctx)
+}
+
+func (h *Handle) Create(ctx context.Context) error {
+	err := h.db.CreateCollection(ctx, h.coll.Name())
+	if err != nil {
+		return fmt.Errorf("CreateCollection: %w", err)
+	}
+
+	_, err = h.coll.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "key", Value: 1},
+			{Key: "ts", Value: -1},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("CreateIndex: %w", err)
 	}
 
 	return nil

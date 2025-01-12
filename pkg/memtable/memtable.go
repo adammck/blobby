@@ -105,39 +105,23 @@ func (mt *Memtable) Init(ctx context.Context) error {
 	}
 
 	coll := db.Collection(metaCollectionName)
-	_, err = coll.InsertOne(ctx, bson.M{"_id": metaActiveMemtableDocID, "value": blueMemtableName})
+	_, err = coll.InsertOne(ctx, bson.M{
+		"_id":   metaActiveMemtableDocID,
+		"value": blueMemtableName,
+	})
 	if err != nil {
 		return fmt.Errorf("InsertOne: %w", err)
 	}
 
-	err = db.CreateCollection(ctx, blueMemtableName)
-	if err != nil {
-		return fmt.Errorf("CreateCollection: %w", err)
-	}
-	cb := db.Collection(blueMemtableName)
-	_, err = cb.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{
-			{Key: "key", Value: 1},
-			{Key: "ts", Value: -1},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("CreateIndex (blue): %w", err)
+	// Initialize both memtables
+	blue := NewHandle(db, blueMemtableName)
+	if err := blue.Create(ctx); err != nil {
+		return err
 	}
 
-	err = db.CreateCollection(ctx, greenMemtableName)
-	if err != nil {
-		return fmt.Errorf("CreateCollection: %w", err)
-	}
-	cg := db.Collection(greenMemtableName)
-	_, err = cg.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{
-			{Key: "key", Value: 1},
-			{Key: "ts", Value: -1},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("CreateIndex (green): %w", err)
+	green := NewHandle(db, greenMemtableName)
+	if err := green.Create(ctx); err != nil {
+		return err
 	}
 
 	return nil
@@ -234,7 +218,5 @@ func (mt *Memtable) Swap(ctx context.Context) (*Handle, string, error) {
 		return nil, "", fmt.Errorf("error updating active memtable: %w", err)
 	}
 
-	return &Handle{
-		coll: db.Collection(curr),
-	}, mt.url(next), nil
+	return NewHandle(db, curr), mt.url(next), nil
 }
