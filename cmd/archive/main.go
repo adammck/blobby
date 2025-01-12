@@ -9,111 +9,9 @@ import (
 	"log"
 	"os"
 
-	"github.com/adammck/archive/pkg/blobstore"
-	"github.com/adammck/archive/pkg/memtable"
-	"github.com/adammck/archive/pkg/metadata"
-	"github.com/adammck/archive/pkg/sstable"
-	"github.com/adammck/archive/pkg/types"
+	"github.com/adammck/archive/pkg/archive"
 	"go.mongodb.org/mongo-driver/bson"
-	"golang.org/x/sync/errgroup"
 )
-
-type Archive struct {
-	mt *memtable.Memtable
-	bs *blobstore.Blobstore
-	md *metadata.Store
-}
-
-func NewArchive(mongoURL, bucket string) *Archive {
-	return &Archive{
-		mt: memtable.New(mongoURL),
-		bs: blobstore.New(bucket),
-		md: metadata.New(mongoURL),
-	}
-}
-
-func (a *Archive) Put(ctx context.Context, key string, value []byte) (string, error) {
-	return a.mt.Put(ctx, key, value)
-}
-
-func (a *Archive) Get(ctx context.Context, key string) ([]byte, string, error) {
-	rec, src, err := a.mt.Get(ctx, key)
-	if err != nil {
-		return nil, "", fmt.Errorf("memtable.Get: %w", err)
-	}
-	if rec != nil {
-		return rec.Document, src, nil
-	}
-
-	metas, err := a.md.GetContaining(ctx, key)
-	if err != nil {
-		return nil, "", fmt.Errorf("metadata.GetContaining: %w", err)
-	}
-
-	for _, meta := range metas {
-		rec, src, err := a.bs.Get(ctx, meta.Filename(), key)
-		if err != nil {
-			return nil, "", fmt.Errorf("blobstore.Get: %w", err)
-		}
-		if rec != nil {
-			return rec.Document, src, nil
-		}
-	}
-
-	// key not found
-	return nil, "", nil
-}
-
-func (a *Archive) Flush(ctx context.Context) (string, int, string, error) {
-
-	// TODO: check whether old sstable is still flushing
-	handle, mt, err := a.mt.Swap(ctx)
-	if err != nil {
-		return "", 0, "", fmt.Errorf("switchMemtable: %s", err)
-	}
-
-	ch := make(chan *types.Record)
-	g, ctx2 := errgroup.WithContext(ctx)
-
-	g.Go(func() error {
-		var err error
-		err = handle.Flush(ctx2, ch)
-		if err != nil {
-			return fmt.Errorf("memtable.Flush: %w", err)
-		}
-		return nil
-	})
-
-	var fn string
-	var n int
-	var meta *sstable.Meta
-
-	g.Go(func() error {
-		var err error
-		fn, n, meta, err = a.bs.Flush(ctx2, ch)
-		if err != nil {
-			return fmt.Errorf("blobstore.Flush: %w", err)
-		}
-		return nil
-	})
-
-	err = g.Wait()
-	if err != nil {
-		return "", 0, "", err
-	}
-
-	err = a.md.Insert(ctx, meta)
-	if err != nil {
-		return "", 0, "", fmt.Errorf("metadata.Insert: %w", err)
-	}
-
-	err = handle.Truncate(ctx)
-	if err != nil {
-		return "", 0, "", fmt.Errorf("handle.Truncate: %w", err)
-	}
-
-	return fn, n, mt, nil
-}
 
 func main() {
 	ctx := context.Background()
@@ -136,16 +34,11 @@ func main() {
 		log.Fatalf("Required: S3_BUCKET")
 	}
 
-	arc := NewArchive(mongoURL, bucket)
+	arc := archive.New(mongoURL, bucket)
 
-	err := arc.mt.Ping(ctx)
+	err := arc.Ping(ctx)
 	if err != nil {
-		log.Fatalf("Failed to connect to MongoDB: %v", err)
-	}
-
-	err = arc.bs.Ping(ctx)
-	if err != nil {
-		log.Fatalf("Failed to connect to S3: %v", err)
+		log.Fatalf("archive.Ping: %v", err)
 	}
 
 	switch cmd {
@@ -162,21 +55,16 @@ func main() {
 	}
 }
 
-func cmdInit(ctx context.Context, arc *Archive) {
-	err := arc.mt.Init(ctx)
+func cmdInit(ctx context.Context, arc *archive.Archive) {
+	err := arc.Init(ctx)
 	if err != nil {
-		log.Fatalf("memtable.Init: %s", err)
-	}
-
-	err = arc.md.Init(ctx)
-	if err != nil {
-		log.Fatalf("metadata.Init: %s", err)
+		log.Fatalf("archive.Init: %s", err)
 	}
 
 	fmt.Println("OK")
 }
 
-func cmdPut(ctx context.Context, arc *Archive, r io.Reader) {
+func cmdPut(ctx context.Context, arc *archive.Archive, r io.Reader) {
 	n := 0
 	var dest string
 	dec := json.NewDecoder(r)
@@ -212,7 +100,7 @@ func cmdPut(ctx context.Context, arc *Archive, r io.Reader) {
 	fmt.Printf("Wrote %d documents to: %s\n", n, dest)
 }
 
-func cmdGet(ctx context.Context, arc *Archive, key string) {
+func cmdGet(ctx context.Context, arc *archive.Archive, key string) {
 	b, src, err := arc.Get(ctx, key)
 	if err != nil {
 		log.Fatalf("Get: %s", err)
@@ -233,7 +121,7 @@ func cmdGet(ctx context.Context, arc *Archive, key string) {
 	fmt.Printf("%s\n", out)
 }
 
-func cmdFlush(ctx context.Context, arc *Archive) {
+func cmdFlush(ctx context.Context, arc *archive.Archive) {
 	fn, n, mt, err := arc.Flush(ctx)
 	if err != nil {
 		log.Fatalf("Flush: %s", err)
