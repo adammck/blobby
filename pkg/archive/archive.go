@@ -105,13 +105,33 @@ func (a *Archive) Get(ctx context.Context, key string) (value []byte, stats *Get
 	return nil, stats, nil
 }
 
-func (a *Archive) Flush(ctx context.Context) (string, int, string, error) {
+type FlushStats struct {
+
+	// The URL of the memtable which was flushed.
+	FlushedMemtable string
+
+	// The URL of the memtable that is now active, after the flush.
+	ActiveMemtable string
+
+	// The URL of the flushed sstable.
+	BlobURL string
+
+	// Metadata about the flushed sstable.
+	Meta *sstable.Meta
+}
+
+func (a *Archive) Flush(ctx context.Context) (*FlushStats, error) {
+	stats := &FlushStats{}
 
 	// TODO: check whether old sstable is still flushing
 	handle, mt, err := a.mt.Swap(ctx)
 	if err != nil {
-		return "", 0, "", fmt.Errorf("switchMemtable: %s", err)
+		return stats, fmt.Errorf("switchMemtable: %s", err)
 	}
+
+	// TODO: fix this by moving URL from Memtable to Handle.
+	//stats.FlushedMemtable = handle.URL()
+	stats.ActiveMemtable = mt
 
 	ch := make(chan *types.Record)
 	g, ctx2 := errgroup.WithContext(ctx)
@@ -125,13 +145,12 @@ func (a *Archive) Flush(ctx context.Context) (string, int, string, error) {
 		return nil
 	})
 
-	var fn string
-	var n int
+	var dest string
 	var meta *sstable.Meta
 
 	g.Go(func() error {
 		var err error
-		fn, n, meta, err = a.bs.Flush(ctx2, ch)
+		dest, _, meta, err = a.bs.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}
@@ -140,18 +159,21 @@ func (a *Archive) Flush(ctx context.Context) (string, int, string, error) {
 
 	err = g.Wait()
 	if err != nil {
-		return "", 0, "", err
+		return stats, err
 	}
 
 	err = a.md.Insert(ctx, meta)
 	if err != nil {
-		return "", 0, "", fmt.Errorf("metadata.Insert: %w", err)
+		return stats, fmt.Errorf("metadata.Insert: %w", err)
 	}
+
+	stats.BlobURL = dest
+	stats.Meta = meta
 
 	err = handle.Truncate(ctx)
 	if err != nil {
-		return "", 0, "", fmt.Errorf("handle.Truncate: %w", err)
+		return stats, fmt.Errorf("handle.Truncate: %w", err)
 	}
 
-	return fn, n, mt, nil
+	return stats, nil
 }

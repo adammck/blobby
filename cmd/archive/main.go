@@ -124,11 +124,11 @@ func cmdGet(ctx context.Context, arc *archive.Archive, key string) {
 }
 
 func cmdFlush(ctx context.Context, arc *archive.Archive) {
-	fn, n, mt, err := arc.Flush(ctx)
+	stats, err := arc.Flush(ctx)
 	if err != nil {
 		log.Fatalf("Flush: %s", err)
 	}
 
-	fmt.Printf("Flushed %d documents to: %s\n", n, fn)
-	fmt.Printf("Active memtable is now: %s\n", mt)
+	fmt.Printf("Flushed %d documents to: %s\n", stats.Meta.Count, stats.BlobURL)
+	fmt.Printf("Active memtable is now: %s\n", stats.ActiveMemtable)
 }

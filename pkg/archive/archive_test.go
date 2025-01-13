@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/adammck/archive/pkg/sstable"
 	"github.com/adammck/archive/pkg/testutil"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
@@ -50,34 +51,47 @@ func TestBasicWriteRead(t *testing.T) {
 
 	// fetch an arbitrary key. they're all sitting in the default memtable
 	// because we haven't flushed anything.
-	val, stats := ta.get("001")
+	val, gstats := ta.get("001")
 	require.Equal(t, val, docs["001"])
-	require.Equal(t, stats, &GetStats{
+	require.Equal(t, gstats, &GetStats{
 		Source:         fmt.Sprintf("%s/archive/blue", env.MongoURL),
 		BlobsFetched:   0,
 		RecordsScanned: 0,
 	})
 
 	// and another one
-	val, _ = ta.get("002")
-	require.Equal(t, val, docs["002"])
+	val, _ = ta.get("005")
+	require.Equal(t, val, docs["005"])
 
 	// flush memtable to the blobstore
-	// TODO: stats
-	_, _, _, err := a.Flush(ctx)
+	fstats, err := a.Flush(ctx)
 	require.NoError(t, err)
+	require.Equal(t, fstats, &FlushStats{
+		FlushedMemtable: "",
+		ActiveMemtable:  fmt.Sprintf("%s/archive/green", env.MongoURL),
+		BlobURL:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, c.Now().Unix()),
+		Meta: &sstable.Meta{
+			MinKey:  "001",
+			MaxKey:  "009",
+			Count:   9,
+			Size:    448, // idk lol
+			Created: c.Now(),
+		},
+	})
 
-	// fetch the same key, and see that it's now in the blobstore
-	val, stats = ta.get("001")
+	// fetch the same key, and see that it's now read from the blobstore.
+	val, gstats = ta.get("001")
 	require.Equal(t, val, docs["001"])
-	require.Equal(t, stats, &GetStats{
+	require.Equal(t, gstats, &GetStats{
 		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, c.Now().Unix()),
 		BlobsFetched:   1,
 		RecordsScanned: 1,
 	})
 
-	val, _ = ta.get("002")
-	require.Equal(t, val, docs["002"])
+	// fetch the other one to show how inefficient our linear scan is. yikes.
+	val, gstats = ta.get("005")
+	require.Equal(t, val, docs["005"])
+	require.Equal(t, gstats.RecordsScanned, 5)
 }
 
 type testArchive struct {
