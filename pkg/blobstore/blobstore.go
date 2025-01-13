@@ -26,26 +26,44 @@ func New(bucket string, clock clockwork.Clock) *Blobstore {
 	}
 }
 
-func (bs *Blobstore) Get(ctx context.Context, fn string, key string) (*types.Record, string, error) {
+type GetStats struct {
+	// The URL of the blob that was fetched.
+	Source string
+
+	// The number of records which were scanned until the key was found.
+	RecordsScanned int
+}
+
+func (bs *Blobstore) Get(ctx context.Context, fn string, key string) (*types.Record, *GetStats, error) {
 	reader, err := bs.getSST(ctx, fn)
 	if err != nil {
-		return nil, "", fmt.Errorf("getSST: %w", err)
+		return nil, nil, fmt.Errorf("getSST: %w", err)
+	}
+
+	var rec *types.Record
+	stats := &GetStats{
+		Source: bs.url(fn),
 	}
 
 	for {
-		rec, err := reader.Next()
+		rec, err = reader.Next()
 		if err != nil {
-			return nil, "", fmt.Errorf("Next: %w", err)
+			return nil, nil, fmt.Errorf("Next: %w", err)
 		}
 		if rec == nil {
 			// end of file
-			return nil, "", nil
+			return nil, nil, nil
 		}
+
+		stats.RecordsScanned++
+
 		// TODO: index the file so we can grab a range
 		if rec.Key == key {
-			return rec, bs.url(fn), nil
+			break
 		}
 	}
+
+	return rec, stats, nil
 }
 
 func (bs *Blobstore) getSST(ctx context.Context, key string) (*sstable.Reader, error) {

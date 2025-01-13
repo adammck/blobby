@@ -102,7 +102,7 @@ func cmdPut(ctx context.Context, arc *archive.Archive, r io.Reader) {
 }
 
 func cmdGet(ctx context.Context, arc *archive.Archive, key string) {
-	b, src, err := arc.Get(ctx, key)
+	b, stats, err := arc.Get(ctx, key)
 	if err != nil {
 		log.Fatalf("Get: %s", err)
 	}
@@ -118,7 +118,8 @@ func cmdGet(ctx context.Context, arc *archive.Archive, key string) {
 		log.Fatalf("json.Marshal: %s", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Got 1 record from: %s\n", src)
+	fmt.Fprintf(os.Stderr, "Scanned %d records in %d blobs\n", stats.RecordsScanned, stats.BlobsFetched)
+	fmt.Fprintf(os.Stderr, "Found 1 record in: %s\n", stats.Source)
 	fmt.Printf("%s\n", out)
 }
 
