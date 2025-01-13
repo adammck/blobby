@@ -49,11 +49,11 @@ func (bs *Blobstore) Get(ctx context.Context, fn string, key string) (*types.Rec
 	for {
 		rec, err = reader.Next()
 		if err != nil {
-			return nil, nil, fmt.Errorf("Next: %w", err)
+			return nil, stats, fmt.Errorf("Next: %w", err)
 		}
 		if rec == nil {
 			// end of file
-			return nil, nil, nil
+			return nil, stats, nil
 		}
 
 		stats.RecordsScanned++
