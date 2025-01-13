@@ -34,6 +34,8 @@ func (w *Writer) Write(out io.Writer) (*Meta, error) {
 	defer w.mu.Unlock()
 
 	sort.Slice(w.records, func(i, j int) bool {
+		// TODO: Also sort by Timestamp! We never throw records away.
+		// This will be important when we start compacting sstables.
 		return w.records[i].Key < w.records[j].Key
 	})
 
@@ -62,6 +64,14 @@ func (w *Writer) Write(out io.Writer) (*Meta, error) {
 
 		if m.MaxKey == "" || record.Key > m.MaxKey {
 			m.MaxKey = record.Key
+		}
+
+		if m.MinTime.IsZero() || record.Timestamp.Before(m.MinTime) {
+			m.MinTime = record.Timestamp
+		}
+
+		if m.MaxTime.IsZero() || record.Timestamp.After(m.MaxTime) {
+			m.MaxTime = record.Timestamp
 		}
 	}
 

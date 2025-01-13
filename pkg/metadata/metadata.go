@@ -94,7 +94,10 @@ func (s *Store) GetContaining(ctx context.Context, key string) ([]*sstable.Meta,
 	cursor, err := db.Collection(collectionName).Find(ctx, bson.M{
 		"min_key": bson.M{"$lte": key},
 		"max_key": bson.M{"$gte": key},
-	}, options.Find().SetSort(bson.D{{Key: "created", Value: -1}}))
+	}, options.Find().SetSort(bson.D{
+		{Key: "max_time", Value: -1},
+		{Key: "created", Value: -1}, // tie-breaker
+	}))
 	if err != nil {
 		return nil, fmt.Errorf("Find: %w", err)
 	}

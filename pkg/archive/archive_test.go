@@ -17,7 +17,12 @@ func setup(t *testing.T) (context.Context, *testutil.Env, *Archive, *clockwork.F
 	ctx := context.Background()
 	env := testutil.SetupTest(ctx, t)
 
-	clock := clockwork.NewFakeClock()
+	// Fix the clock to the current time, but simplify things by rounding to the
+	// previous second. BSON encoding only supports milliseconds, so we lose the
+	// nanoseconds when we round-trip through BSON, making comparisons annoying.
+	ts := time.Now().UTC().Truncate(time.Second)
+	clock := clockwork.NewFakeClockAt(ts)
+
 	arc := New(env.MongoURL, env.S3Bucket, clock)
 
 	err := arc.Init(ctx)
@@ -39,15 +44,20 @@ func TestBasicWriteRead(t *testing.T) {
 		a:   a,
 	}
 
-	// prepare n docs full of junk
+	t1 := c.Now()
+
+	// prepare n docs full of junk and write them all to the memtable. note that
+	// there's no overwriting, because each one has a unique key.
 	docs := map[string][]byte{}
 	for i := 1; i <= 10; i++ {
+
+		// Offset each write by 10ms, so each has a different but predictable
+		// timestamp. This is annoying, but important to validate ordering.
+		c.Advance(15 * time.Millisecond)
+
 		k := fmt.Sprintf("%03d", i)
 		docs[k] = []byte(strings.Repeat(k, 3))
-	}
-
-	for k, v := range docs {
-		ta.put(k, v)
+		ta.put(k, docs[k])
 	}
 
 	// fetch an arbitrary key. they're all sitting in the default memtable
@@ -65,19 +75,21 @@ func TestBasicWriteRead(t *testing.T) {
 	require.Equal(t, val, docs["005"])
 
 	// flush memtable to the blobstore
-	f1t := c.Now()
+	t2 := c.Now()
 	fstats, err := a.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
 		FlushedMemtable: "",
 		ActiveMemtable:  fmt.Sprintf("%s/archive/green", env.MongoURL),
-		BlobURL:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, f1t.Unix()),
+		BlobURL:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t2.Unix()),
 		Meta: &sstable.Meta{
 			MinKey:  "001",
 			MaxKey:  "010",
+			MinTime: t1.Add(15 * time.Millisecond),
+			MaxTime: t1.Add(15 * time.Millisecond * 10),
 			Count:   10,
 			Size:    497, // idk lol
-			Created: f1t,
+			Created: t2,
 		},
 	}, fstats)
 
@@ -85,7 +97,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = ta.get("001")
 	require.Equal(t, val, docs["001"])
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, f1t.Unix()),
+		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t2.Unix()),
 		BlobsFetched:   1,
 		RecordsScanned: 1,
 	}, gstats)
@@ -97,6 +109,9 @@ func TestBasicWriteRead(t *testing.T) {
 
 	// write ten more new documents. they'll end up in the other memtable.
 	for i := 11; i <= 20; i++ {
+		// see explanation above.
+		c.Advance(15 * time.Millisecond)
+
 		k := fmt.Sprintf("%03d", i)
 		docs[k] = []byte(strings.Repeat(k, 3))
 		ta.put(k, docs[k])
@@ -111,23 +126,25 @@ func TestBasicWriteRead(t *testing.T) {
 
 	// pass some time, so the second sstable will have a different URL. (they're
 	// just named by the current time for now.)
-	c.Advance(1 * time.Second)
+	c.Advance(1 * time.Hour)
 
 	// flush again. note that the keys in this sstable are totally disjoint from
 	// the first.
-	f2t := c.Now()
+	t3 := c.Now()
 	fstats, err = a.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
 		FlushedMemtable: "", // TODO
 		ActiveMemtable:  fmt.Sprintf("%s/archive/blue", env.MongoURL),
-		BlobURL:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, f2t.Unix()),
+		BlobURL:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t3.Unix()),
 		Meta: &sstable.Meta{
 			MinKey:  "011",
 			MaxKey:  "020",
+			MinTime: t2.Add(15 * time.Millisecond),
+			MaxTime: t2.Add(15 * time.Millisecond * 10),
 			Count:   10,
 			Size:    497,
-			Created: f2t,
+			Created: t3,
 		},
 	}, fstats)
 
@@ -136,14 +153,14 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = ta.get("002")
 	require.Equal(t, val, docs["002"])
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, f1t.Unix()),
+		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t2.Unix()),
 		BlobsFetched:   1,
 		RecordsScanned: 2,
 	}, gstats)
 	val, gstats = ta.get("014")
 	require.Equal(t, val, docs["014"])
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, f2t.Unix()),
+		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t3.Unix()),
 		BlobsFetched:   1,
 		RecordsScanned: 4,
 	}, gstats)
@@ -151,7 +168,11 @@ func TestBasicWriteRead(t *testing.T) {
 	// write new versions of two of the keys to the memtable. note that both of
 	// them already exist different sstables.
 	// TODO: PutStats
+
+	c.Advance(15 * time.Millisecond)
 	ta.put("003", []byte("xxx"))
+
+	c.Advance(15 * time.Millisecond)
 	ta.put("013", []byte("yyy"))
 
 	// fetch them to show that we're reading from the memtable, and getting the
@@ -168,20 +189,22 @@ func TestBasicWriteRead(t *testing.T) {
 	}, gstats)
 
 	// flush again. the two keys we just wrote will end up in the new sstable.
-	c.Advance(1 * time.Second)
-	f3t := c.Now()
+	c.Advance(1 * time.Hour)
+	t4 := c.Now()
 	fstats, err = a.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
 		FlushedMemtable: "", // TODO
 		ActiveMemtable:  fmt.Sprintf("%s/archive/green", env.MongoURL),
-		BlobURL:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, f3t.Unix()),
+		BlobURL:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t4.Unix()),
 		Meta: &sstable.Meta{
 			MinKey:  "003",
 			MaxKey:  "013",
+			MinTime: t3.Add(15 * time.Millisecond),
+			MaxTime: t3.Add(15 * time.Millisecond * 2),
 			Count:   2,
 			Size:    93,
-			Created: f3t,
+			Created: t4,
 		},
 	}, fstats)
 
@@ -197,7 +220,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = ta.get("003")
 	require.Equal(t, val, []byte("xxx"))
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, f3t.Unix()),
+		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t4.Unix()),
 		BlobsFetched:   1, // <--
 		RecordsScanned: 1,
 	}, gstats)
@@ -207,7 +230,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = ta.get("002")
 	require.Equal(t, val, docs["002"])
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, f1t.Unix()),
+		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t2.Unix()),
 		BlobsFetched:   1, // <--
 		RecordsScanned: 2,
 	}, gstats)
@@ -223,7 +246,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = ta.get("012")
 	require.Equal(t, val, docs["012"])
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, f2t.Unix()),
+		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t3.Unix()),
 		BlobsFetched:   2, // <--
 		RecordsScanned: 4, // (003, 013), (011, 012)
 	}, gstats)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/adammck/archive/pkg/types"
 	"github.com/jonboulle/clockwork"
@@ -22,8 +23,11 @@ func TestAddRecord(t *testing.T) {
 
 func TestWriteRecords(t *testing.T) {
 	w, c := newWriter()
-	_ = w.Add(&types.Record{Key: "key1", Timestamp: c.Now(), Document: []byte("doc1")})
-	_ = w.Add(&types.Record{Key: "key2", Timestamp: c.Now(), Document: []byte("doc2")})
+	ts1 := c.Now()
+	ts2 := ts1.Add(time.Hour)
+
+	_ = w.Add(&types.Record{Key: "key1", Timestamp: ts1, Document: []byte("doc1")})
+	_ = w.Add(&types.Record{Key: "key2", Timestamp: ts2, Document: []byte("doc2")})
 
 	var buf bytes.Buffer
 	meta, err := w.Write(&buf)
@@ -31,6 +35,36 @@ func TestWriteRecords(t *testing.T) {
 	assert.Equal(t, 2, meta.Count)
 	assert.Equal(t, "key1", meta.MinKey)
 	assert.Equal(t, "key2", meta.MaxKey)
+	assert.Equal(t, ts1, meta.MinTime)
+	assert.Equal(t, ts2, meta.MaxTime)
+}
+
+func TestWriteRecordsReverseTimes(t *testing.T) {
+	w, c := newWriter()
+	ts1 := c.Now()
+	ts2 := ts1.Add(time.Hour)
+
+	// Add records with timestamps in reverse order
+	_ = w.Add(&types.Record{Key: "key1", Timestamp: ts2, Document: []byte("doc1")})
+	_ = w.Add(&types.Record{Key: "key2", Timestamp: ts1, Document: []byte("doc2")})
+
+	var buf bytes.Buffer
+	meta, err := w.Write(&buf)
+	require.NoError(t, err)
+	assert.Equal(t, ts1, meta.MinTime)
+	assert.Equal(t, ts2, meta.MaxTime)
+}
+
+func TestWriteTimestampsWithSingleRecord(t *testing.T) {
+	w, c := newWriter()
+	ts := c.Now()
+	_ = w.Add(&types.Record{Key: "key1", Timestamp: ts, Document: []byte("doc1")})
+
+	var buf bytes.Buffer
+	meta, err := w.Write(&buf)
+	require.NoError(t, err)
+	assert.Equal(t, ts, meta.MinTime)
+	assert.Equal(t, ts, meta.MaxTime)
 }
 
 func TestConcurrentAdd(t *testing.T) {
@@ -61,8 +95,9 @@ func TestWriteError(t *testing.T) {
 
 func TestWriteOrder(t *testing.T) {
 	w, c := newWriter()
-	w.Add(&types.Record{Key: "key2", Timestamp: c.Now(), Document: []byte("doc2")})
-	w.Add(&types.Record{Key: "key1", Timestamp: c.Now(), Document: []byte("doc1")})
+	ts := c.Now()
+	w.Add(&types.Record{Key: "key2", Timestamp: ts, Document: []byte("doc2")})
+	w.Add(&types.Record{Key: "key1", Timestamp: ts, Document: []byte("doc1")})
 
 	var buf bytes.Buffer
 	_, err := w.Write(&buf)

@@ -49,6 +49,8 @@ func TestBasicUsage(t *testing.T) {
 	m1 := &sstable.Meta{
 		MinKey:  "a",
 		MaxKey:  "c",
+		MinTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		MaxTime: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC),
 		Count:   10,
 		Size:    1000,
 		Created: time.Now().UTC(),
@@ -70,15 +72,18 @@ func TestBasicUsage(t *testing.T) {
 	assert.Empty(t, metas)
 }
 
-func TestOverlappingSSTables(t *testing.T) {
+func TestSortByMaxTime(t *testing.T) {
 	ctx, store := setup(t)
 
+	now := time.Now().UTC()
 	m1 := &sstable.Meta{
 		MinKey:  "a",
 		MaxKey:  "c",
+		MinTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		MaxTime: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC),
 		Count:   10,
 		Size:    1000,
-		Created: time.Now().UTC(),
+		Created: now.Add(-time.Hour), // older creation time
 	}
 	err := store.Insert(ctx, m1)
 	require.NoError(t, err)
@@ -86,32 +91,73 @@ func TestOverlappingSSTables(t *testing.T) {
 	m2 := &sstable.Meta{
 		MinKey:  "b",
 		MaxKey:  "d",
+		MinTime: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC),
+		MaxTime: time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC),
 		Count:   10,
 		Size:    1000,
-		Created: time.Now().UTC().Add(time.Hour),
+		Created: now,
 	}
 	err = store.Insert(ctx, m2)
 	require.NoError(t, err)
 
-	// in range of both
+	// should be sorted by max_time desc
 	metas, err := store.GetContaining(ctx, "b")
 	require.NoError(t, err)
 	require.Len(t, metas, 2)
+	assert.Equal(t, m2.MaxTime, metas[0].MaxTime) // newer max time first
+	assert.Equal(t, m1.MaxTime, metas[1].MaxTime)
+}
 
-	// sorted by creation time
-	assert.Equal(t, m2.Created.Unix(), metas[0].Created.Unix())
+func TestSortByCreatedForSameMaxTime(t *testing.T) {
+	ctx, store := setup(t)
+
+	now := time.Now().UTC()
+	sameTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	m1 := &sstable.Meta{
+		MinKey:  "a",
+		MaxKey:  "c",
+		MinTime: sameTime,
+		MaxTime: sameTime,
+		Count:   10,
+		Size:    1000,
+		Created: now.Add(-time.Hour), // older creation time
+	}
+	err := store.Insert(ctx, m1)
+	require.NoError(t, err)
+
+	m2 := &sstable.Meta{
+		MinKey:  "b",
+		MaxKey:  "d",
+		MinTime: sameTime,
+		MaxTime: sameTime,
+		Count:   10,
+		Size:    1000,
+		Created: now, // newer creation time
+	}
+	err = store.Insert(ctx, m2)
+	require.NoError(t, err)
+
+	// should be sorted by created desc when max_time is equal
+	metas, err := store.GetContaining(ctx, "b")
+	require.NoError(t, err)
+	require.Len(t, metas, 2)
+	assert.Equal(t, m2.Created.Unix(), metas[0].Created.Unix()) // newer created first
 	assert.Equal(t, m1.Created.Unix(), metas[1].Created.Unix())
 }
 
 func TestBoundaryCases(t *testing.T) {
 	ctx, store := setup(t)
 
+	now := time.Now().UTC()
 	m1 := &sstable.Meta{
 		MinKey:  "m",
 		MaxKey:  "n",
+		MinTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		MaxTime: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC),
 		Count:   10,
 		Size:    1000,
-		Created: time.Now().UTC(),
+		Created: now,
 	}
 	err := store.Insert(ctx, m1)
 	require.NoError(t, err)
@@ -121,7 +167,7 @@ func TestBoundaryCases(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, metas, 1)
 
-	// on max
+	// on max key
 	metas, err = store.GetContaining(ctx, "n")
 	require.NoError(t, err)
 	require.Len(t, metas, 1)

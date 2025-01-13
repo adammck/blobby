@@ -67,6 +67,7 @@ type GetStats struct {
 	RecordsScanned int
 }
 
+// TODO: return the Record, or maybe the timestamp too, not just the value.
 func (a *Archive) Get(ctx context.Context, key string) (value []byte, stats *GetStats, err error) {
 	stats = &GetStats{}
 
