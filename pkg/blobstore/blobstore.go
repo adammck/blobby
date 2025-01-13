@@ -8,6 +8,7 @@ import (
 
 	"github.com/adammck/archive/pkg/sstable"
 	"github.com/adammck/archive/pkg/types"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jonboulle/clockwork"
@@ -144,6 +145,9 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (dest str
 		Bucket: &bs.bucket,
 		Key:    &key,
 		Body:   f,
+		// never overwrite sstables. they're immutable. this is only a problem
+		// if we try to put two at the same time, since they're timestamped.
+		IfNoneMatch: aws.String("*"),
 	})
 	if err != nil {
 		return "", 0, nil, fmt.Errorf("PutObject: %w", err)
