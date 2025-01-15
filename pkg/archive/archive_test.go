@@ -250,6 +250,47 @@ func TestBasicWriteRead(t *testing.T) {
 		BlobsFetched:   2, // <--
 		RecordsScanned: 4, // (003, 013), (011, 012)
 	}, gstats)
+
+	// perform a compaction
+	c.Advance(1 * time.Hour)
+	t5 := c.Now()
+	cstats, err := a.Compact(ctx)
+	require.NoError(t, err)
+	require.Len(t, cstats, 1) // one compaction group for now
+	require.NoError(t, cstats[0].Error)
+
+	require.Len(t, cstats[0].Inputs, 3)
+	require.Len(t, cstats[0].Outputs, 1)
+
+	val, gstats = ta.get("003")
+	require.Equal(t, []byte("xxx"), val)
+	require.Equal(t, &GetStats{
+		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t5.Unix()),
+		BlobsFetched:   1,
+		RecordsScanned: 3,
+	}, gstats)
+
+	val, gstats = ta.get("013")
+	require.Equal(t, []byte("yyy"), val)
+	require.Equal(t, &GetStats{
+		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t5.Unix()),
+		BlobsFetched:   1,
+		RecordsScanned: 14,
+	}, gstats)
+
+	val, gstats = ta.get("001")
+	require.Equal(t, docs["001"], val)
+	require.Equal(t, &GetStats{
+		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t5.Unix()),
+		BlobsFetched:   1,
+		RecordsScanned: 1,
+	}, gstats)
+
+	// check that the old sstables were deleted.
+	for _, tt := range []time.Time{t2, t3, t4} {
+		_, _, err = a.bs.Find(ctx, fmt.Sprintf("%d.sstable", tt.Unix()), "001")
+		require.Error(t, err, "SSTable from time %v should have been deleted", t)
+	}
 }
 
 type testArchive struct {

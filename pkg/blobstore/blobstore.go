@@ -35,8 +35,8 @@ type GetStats struct {
 	RecordsScanned int
 }
 
-func (bs *Blobstore) Get(ctx context.Context, fn string, key string) (*types.Record, *GetStats, error) {
-	reader, err := bs.getSST(ctx, fn)
+func (bs *Blobstore) Find(ctx context.Context, fn string, key string) (*types.Record, *GetStats, error) {
+	reader, err := bs.Get(ctx, fn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("getSST: %w", err)
 	}
@@ -67,7 +67,7 @@ func (bs *Blobstore) Get(ctx context.Context, fn string, key string) (*types.Rec
 	return rec, stats, nil
 }
 
-func (bs *Blobstore) getSST(ctx context.Context, key string) (*sstable.Reader, error) {
+func (bs *Blobstore) Get(ctx context.Context, key string) (*sstable.Reader, error) {
 	s3client, err := bs.getS3(ctx)
 	if err != nil {
 		return nil, err
@@ -90,6 +90,23 @@ func (bs *Blobstore) getSST(ctx context.Context, key string) (*sstable.Reader, e
 	return reader, nil
 }
 
+func (bs *Blobstore) Delete(ctx context.Context, key string) error {
+	s3c, err := bs.getS3(ctx)
+	if err != nil {
+		return err
+	}
+
+	_, err = s3c.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: &bs.bucket,
+		Key:    &key,
+	})
+	if err != nil {
+		return fmt.Errorf("DeleteObject: %w", err)
+	}
+
+	return nil
+}
+
 func (bs *Blobstore) Ping(ctx context.Context) error {
 	_, err := bs.getS3(ctx)
 	return err
@@ -101,6 +118,7 @@ func (bs *Blobstore) Init(ctx context.Context) error {
 
 var NoRecords = errors.New("NoRecords")
 
+// TODO: remove most of the return values; meta contains everything.
 func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (dest string, count int, meta *sstable.Meta, err error) {
 	f, err := os.CreateTemp("", "sstable-*")
 	if err != nil {

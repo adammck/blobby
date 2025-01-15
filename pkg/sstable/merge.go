@@ -37,7 +37,9 @@ func NewMergeReader(readers []*Reader) (*MergeReader, error) {
 
 func (m *MergeReader) Next() (*types.Record, error) {
 	if m.h.Len() == 0 {
-		return nil, io.EOF
+		// TODO: is this an error or not? unclear!
+		//return nil, io.EOF
+		return nil, nil
 	}
 
 	// get the next record, in terms of key and timestamp, across all readers.
