@@ -63,6 +63,26 @@ Got 1 document from mongodb://localhost:27017/db-whatever/green
 {"_id": 2, "name": "bulbasaur", "trainer": "ash"}
 ```
 
+Compact all sstables into one:
+
+```console
+$ ./archive compact
+Compaction 1:
+  Input files: 4
+  Output files: 1
+  Output 1: s3://bucket-whatever/1736478581.sstable (16 records, 2048 bytes)
+```
+
+Compact sstables together until they reach 1MB:
+
+```console
+$ ./archive compact --order smallest-first --min-files 8 --max-size 1048576
+Compaction 1:
+  Input files: 8
+  Output files: 1
+  Output 1: s3://bucket-whatever/1736478582.sstable (128 records, 524288 bytes)
+```
+
 ## License
 
 MIT.
