@@ -191,6 +191,9 @@ func (a *Archive) Flush(ctx context.Context) (*FlushStats, error) {
 	return stats, nil
 }
 
-func (a *Archive) Compact(ctx context.Context) ([]*compactor.CompactionStats, error) {
-	return a.comp.Run(ctx)
+type CompactionStats = compactor.CompactionStats
+type CompactionOptions = compactor.CompactionOptions
+
+func (a *Archive) Compact(ctx context.Context, opts CompactionOptions) ([]*CompactionStats, error) {
+	return a.comp.Run(ctx, opts)
 }

@@ -11,7 +11,7 @@ type Meta struct {
 	MinTime time.Time `bson:"min_time"`
 	MaxTime time.Time `bson:"max_time"`
 	Count   int       `bson:"count"`
-	Size    int64     `bson:"size"`
+	Size    int       `bson:"size"`
 	Created time.Time `bson:"created"`
 }
 

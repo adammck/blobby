@@ -254,7 +254,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// perform a full compaction. every sstable merged into one.
 	c.Advance(1 * time.Hour)
 	t5 := c.Now()
-	cstats, err := a.Compact(ctx)
+	cstats, err := a.Compact(ctx, CompactionOptions{})
 	require.NoError(t, err)
 	require.Len(t, cstats, 1)
 	require.NoError(t, cstats[0].Error)
