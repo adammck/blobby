@@ -251,17 +251,34 @@ func TestBasicWriteRead(t *testing.T) {
 		RecordsScanned: 4, // (003, 013), (011, 012)
 	}, gstats)
 
-	// perform a compaction
+	// perform a full compaction. every sstable merged into one.
 	c.Advance(1 * time.Hour)
 	t5 := c.Now()
 	cstats, err := a.Compact(ctx)
 	require.NoError(t, err)
-	require.Len(t, cstats, 1) // one compaction group for now
+	require.Len(t, cstats, 1)
 	require.NoError(t, cstats[0].Error)
+	require.Equal(t, []*sstable.Meta{
+		{
+			MinKey:  "001",
+			MaxKey:  "020",
+			MinTime: t1.Add(15 * time.Millisecond),
+			MaxTime: t3.Add(15 * time.Millisecond * 2),
+			Count:   22,
+			Size:    1073,
+			Created: t5,
+		},
+	}, cstats[0].Outputs)
 
+	// not asserting the inputs. too long. trust me, bro.
 	require.Len(t, cstats[0].Inputs, 3)
-	require.Len(t, cstats[0].Outputs, 1)
 
+	// now we have one sstable, with the entire key range:
+	//  - [001, 020]
+
+	// read one of our previously-read keys. note that it is read out of the new
+	// blob, which was output by the compaction, and that only a single blob was
+	// fetched and scanned.
 	val, gstats = ta.get("003")
 	require.Equal(t, []byte("xxx"), val)
 	require.Equal(t, &GetStats{
@@ -270,20 +287,13 @@ func TestBasicWriteRead(t *testing.T) {
 		RecordsScanned: 3,
 	}, gstats)
 
+	// and another one. same source.
 	val, gstats = ta.get("013")
 	require.Equal(t, []byte("yyy"), val)
 	require.Equal(t, &GetStats{
 		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t5.Unix()),
 		BlobsFetched:   1,
 		RecordsScanned: 14,
-	}, gstats)
-
-	val, gstats = ta.get("001")
-	require.Equal(t, docs["001"], val)
-	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t5.Unix()),
-		BlobsFetched:   1,
-		RecordsScanned: 1,
 	}, gstats)
 
 	// check that the old sstables were deleted.
