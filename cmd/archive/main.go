@@ -8,8 +8,10 @@ import (
 	"io"
 	"log"
 	"os"
+	"time"
 
 	"github.com/adammck/archive/pkg/archive"
+	"github.com/adammck/archive/pkg/compactor"
 	"github.com/jonboulle/clockwork"
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -51,8 +53,95 @@ func main() {
 		cmdGet(ctx, arc, os.Args[2])
 	case "flush":
 		cmdFlush(ctx, arc)
+	case "compact":
+		cmdCompact(ctx, arc, bucket)
 	default:
 		log.Fatalf("Unknown command: %s", cmd)
+	}
+}
+
+type compactFlags struct {
+	order    string
+	minFiles int
+	maxFiles int
+	minSize  int64
+	maxSize  int64
+	minTime  string
+	maxTime  string
+}
+
+func cmdCompact(ctx context.Context, arc *archive.Archive, bucket string) {
+	flags := flag.NewFlagSet("compact", flag.ExitOnError)
+	cf := compactFlags{}
+
+	flags.StringVar(&cf.order, "order", "oldest-first", "Order to compact files (oldest-first, newest-first, smallest-first, largest-first)")
+	flags.IntVar(&cf.minFiles, "min-files", 2, "Minimum number of files to compact")
+	flags.IntVar(&cf.maxFiles, "max-files", 0, "Maximum number of files to compact (0 for unlimited)")
+	flags.Int64Var(&cf.minSize, "min-size", 0, "Minimum total input size in bytes")
+	flags.Int64Var(&cf.maxSize, "max-size", 0, "Maximum total input size in bytes")
+	flags.StringVar(&cf.minTime, "min-time", "", "Only include records newer than this (RFC3339)")
+	flags.StringVar(&cf.maxTime, "max-time", "", "Only include records older than this (RFC3339)")
+
+	flags.Parse(os.Args[2:])
+
+	opts := compactor.CompactionOptions{
+		MinFiles: cf.minFiles,
+		MaxFiles: cf.maxFiles,
+	}
+
+	switch cf.order {
+	case "oldest-first":
+		opts.Order = compactor.OldestFirst
+	case "newest-first":
+		opts.Order = compactor.NewestFirst
+	case "smallest-first":
+		opts.Order = compactor.SmallestFirst
+	case "largest-first":
+		opts.Order = compactor.LargestFirst
+	default:
+		log.Fatalf("Invalid order: %s", cf.order)
+	}
+
+	if cf.minSize > 0 {
+		opts.MinInputSize = int(cf.minSize)
+	}
+	if cf.maxSize > 0 {
+		opts.MaxInputSize = int(cf.maxSize)
+	}
+
+	if cf.minTime != "" {
+		t, err := time.Parse(time.RFC3339, cf.minTime)
+		if err != nil {
+			log.Fatalf("Invalid min-time: %v", err)
+		}
+		opts.MinTime = t
+	}
+
+	if cf.maxTime != "" {
+		t, err := time.Parse(time.RFC3339, cf.maxTime)
+		if err != nil {
+			log.Fatalf("Invalid max-time: %v", err)
+		}
+		opts.MaxTime = t
+	}
+
+	stats, err := arc.Compact(ctx, opts)
+	if err != nil {
+		log.Fatalf("Compact: %v", err)
+	}
+
+	for i, s := range stats {
+		if s.Error != nil {
+			fmt.Printf("Compaction %d failed: %v\n", i+1, s.Error)
+			continue
+		}
+
+		fmt.Printf("Compaction %d:\n", i+1)
+		fmt.Printf("  Input files: %d\n", len(s.Inputs))
+		fmt.Printf("  Output files: %d\n", len(s.Outputs))
+		for j, m := range s.Outputs {
+			fmt.Printf("  Output %d: s3://%s/%s (%d records, %d bytes)\n", j+1, bucket, m.Filename(), m.Count, m.Size)
+		}
 	}
 }
 
