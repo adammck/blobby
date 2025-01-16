@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adammck/archive/pkg/compactor"
 	"github.com/adammck/archive/pkg/sstable"
 	"github.com/adammck/archive/pkg/testutil"
 	"github.com/jonboulle/clockwork"
@@ -43,6 +44,8 @@ func TestBasicWriteRead(t *testing.T) {
 		t:   t,
 		a:   a,
 	}
+
+	// -------------------------------------- part one: inserts and flushes ----
 
 	t1 := c.Now()
 
@@ -165,6 +168,8 @@ func TestBasicWriteRead(t *testing.T) {
 		RecordsScanned: 4,
 	}, gstats)
 
+	// ------------------------- part two: updates, or masking old versions ----
+
 	// write new versions of two of the keys to the memtable. note that both of
 	// them already exist different sstables.
 	// TODO: PutStats
@@ -251,6 +256,8 @@ func TestBasicWriteRead(t *testing.T) {
 		RecordsScanned: 4, // (003, 013), (011, 012)
 	}, gstats)
 
+	// -------------------------------------- part three: simple compaction ----
+
 	// perform a full compaction. every sstable merged into one.
 	c.Advance(1 * time.Hour)
 	t5 := c.Now()
@@ -299,8 +306,109 @@ func TestBasicWriteRead(t *testing.T) {
 	// check that the old sstables were deleted.
 	for _, tt := range []time.Time{t2, t3, t4} {
 		_, _, err = a.bs.Find(ctx, fmt.Sprintf("%d.sstable", tt.Unix()), "001")
-		require.Error(t, err, "SSTable from time %v should have been deleted", t)
+		require.Error(t, err)
 	}
+
+	// ------------------------------------- part four: flexible compaction ----
+
+	// write some new records that won't overlap with any other keys
+	c.Advance(15 * time.Millisecond)
+	ta.put("101", []byte("a1"))
+	c.Advance(15 * time.Millisecond)
+	ta.put("102", []byte("a2"))
+
+	// flush to create second sstable
+	c.Advance(1 * time.Hour)
+	t6 := c.Now()
+	fstats, err = a.Flush(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, fstats.Meta.Count)
+
+	// write more records
+	c.Advance(15 * time.Millisecond)
+	ta.put("201", []byte("b1"))
+	c.Advance(15 * time.Millisecond)
+	ta.put("202", []byte("b2"))
+
+	// flush to create third sstable
+	c.Advance(1 * time.Hour)
+	t7 := c.Now()
+	fstats, err = a.Flush(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, fstats.Meta.Count)
+
+	// write final records
+	c.Advance(15 * time.Millisecond)
+	ta.put("301", []byte("c1"))
+	c.Advance(15 * time.Millisecond)
+	ta.put("302", []byte("c2"))
+
+	// flush to create fourth sstable
+	c.Advance(1 * time.Hour)
+	t8 := c.Now()
+	fstats, err = a.Flush(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, fstats.Meta.Count)
+
+	// now we have four sstables:
+	//  - [001, 020] at t5 (oldest, full compaction from before)
+	//  - [101, 102] at t6
+	//  - [201, 202] at t7
+	//  - [301, 302] at t8 (newest)
+
+	// compact only the two newest files together
+	c.Advance(1 * time.Hour)
+	t9 := c.Now()
+	cstats, err = a.Compact(ctx, CompactionOptions{
+		Order:    compactor.NewestFirst,
+		MaxFiles: 2,
+	})
+	require.NoError(t, err)
+	require.Len(t, cstats, 1)
+	require.NoError(t, cstats[0].Error)
+
+	// verify only newest two files were inputs
+	require.Len(t, cstats[0].Inputs, 2)
+	require.Equal(t, t8.Unix(), cstats[0].Inputs[0].Created.Unix())
+	require.Equal(t, t7.Unix(), cstats[0].Inputs[1].Created.Unix())
+
+	// verify output metadata
+	require.Len(t, cstats[0].Outputs, 1)
+	require.Equal(t, &sstable.Meta{
+		MinKey:  "201",
+		MaxKey:  "302",
+		MinTime: t6.Add(15 * time.Millisecond * 1),
+		MaxTime: t7.Add(15 * time.Millisecond * 2),
+		Count:   4,
+		Size:    175,
+		Created: t9,
+	}, cstats[0].Outputs[0])
+
+	// verify we can read from the newly compacted file
+	val, gstats = ta.get("301")
+	require.Equal(t, []byte("c1"), val)
+	require.Equal(t, &GetStats{
+		Source:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t9.Unix()),
+		BlobsFetched:   1,
+		RecordsScanned: 3,
+	}, gstats)
+
+	// verify the old uncompacted sstables still exist
+	_, _, err = a.bs.Find(ctx, fmt.Sprintf("%d.sstable", t5.Unix()), "001")
+	require.NoError(t, err)
+	_, _, err = a.bs.Find(ctx, fmt.Sprintf("%d.sstable", t6.Unix()), "101")
+	require.NoError(t, err)
+
+	// verify the compacted sstables were deleted
+	for _, tt := range []time.Time{t7, t8} {
+		_, _, err = a.bs.Find(ctx, fmt.Sprintf("%d.sstable", tt.Unix()), "001")
+		require.Error(t, err)
+	}
+
+	// we finish with four sstables:
+	//  - [001, 020] at t5 (oldest, full compaction)
+	//  - [101, 102] at t6
+	//  - [201, 302] at t9
 }
 
 type testArchive struct {
