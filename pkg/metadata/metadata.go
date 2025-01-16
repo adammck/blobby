@@ -85,6 +85,29 @@ func (s *Store) Insert(ctx context.Context, meta *sstable.Meta) error {
 	return nil
 }
 
+func (s *Store) Delete(ctx context.Context, meta *sstable.Meta) error {
+	db, err := s.getMongo(ctx)
+	if err != nil {
+		return fmt.Errorf("getMongo: %w", err)
+	}
+
+	// TODO: add an ID to Meta and use that instead of this weird filter.
+	result, err := db.Collection(collectionName).DeleteOne(ctx, bson.M{
+		"created": meta.Created,
+		"min_key": meta.MinKey,
+		"max_key": meta.MaxKey,
+	})
+	if err != nil {
+		return fmt.Errorf("DeleteOne: %w", err)
+	}
+
+	if result.DeletedCount != 1 {
+		return fmt.Errorf("expected to delete 1 record, deleted %d", result.DeletedCount)
+	}
+
+	return nil
+}
+
 func (s *Store) GetContaining(ctx context.Context, key string) ([]*sstable.Meta, error) {
 	db, err := s.getMongo(ctx)
 	if err != nil {
@@ -105,6 +128,29 @@ func (s *Store) GetContaining(ctx context.Context, key string) ([]*sstable.Meta,
 
 	var metas []*sstable.Meta
 	if err := cursor.All(ctx, &metas); err != nil {
+		return nil, fmt.Errorf("cursor.All: %w", err)
+	}
+
+	return metas, nil
+}
+
+func (s *Store) GetAllMetas(ctx context.Context) ([]*sstable.Meta, error) {
+	db, err := s.getMongo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getMongo: %w", err)
+	}
+
+	cur, err := db.Collection(collectionName).Find(ctx, bson.M{}, options.Find().SetSort(bson.D{
+		{Key: "min_key", Value: 1},
+		{Key: "max_time", Value: -1},
+	}))
+	if err != nil {
+		return nil, fmt.Errorf("Find: %w", err)
+	}
+	defer cur.Close(ctx)
+
+	var metas []*sstable.Meta
+	if err := cur.All(ctx, &metas); err != nil {
 		return nil, fmt.Errorf("cursor.All: %w", err)
 	}
 

@@ -58,26 +58,26 @@ func TestFlush(t *testing.T) {
 	assert.Equal(t, "test1", meta.MinKey)
 	assert.Equal(t, "test2", meta.MaxKey)
 
-	rec1, _, err := bs.Get(ctx, meta.Filename(), "test1")
+	rec1, _, err := bs.Find(ctx, meta.Filename(), "test1")
 	require.NoError(t, err)
 	assert.NotNil(t, rec1)
 	assert.Equal(t, "test1", rec1.Key)
 	assert.Equal(t, []byte("doc1"), rec1.Document)
 
-	rec2, _, err := bs.Get(ctx, meta.Filename(), "test2")
+	rec2, _, err := bs.Find(ctx, meta.Filename(), "test2")
 	require.NoError(t, err)
 	assert.NotNil(t, rec2)
 	assert.Equal(t, "test2", rec2.Key)
 	assert.Equal(t, []byte("doc2"), rec2.Document)
 
 	// unknown key
-	rec3, _, err := bs.Get(ctx, meta.Filename(), "test3")
+	rec3, _, err := bs.Find(ctx, meta.Filename(), "test3")
 	require.NoError(t, err)
 	assert.Nil(t, rec3)
 }
 
 func TestGetNonExistentFile(t *testing.T) {
 	ctx, _, bs, _ := setup(t)
-	_, _, err := bs.Get(ctx, "nonexistent.sstable", "test1")
+	_, _, err := bs.Find(ctx, "nonexistent.sstable", "test1")
 	assert.Error(t, err)
 }

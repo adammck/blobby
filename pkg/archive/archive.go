@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/adammck/archive/pkg/blobstore"
+	"github.com/adammck/archive/pkg/compactor"
 	"github.com/adammck/archive/pkg/memtable"
 	"github.com/adammck/archive/pkg/metadata"
 	"github.com/adammck/archive/pkg/sstable"
@@ -18,14 +19,19 @@ type Archive struct {
 	bs    *blobstore.Blobstore
 	md    *metadata.Store
 	clock clockwork.Clock
+	comp  *compactor.Compactor
 }
 
 func New(mongoURL, bucket string, clock clockwork.Clock) *Archive {
+	bs := blobstore.New(bucket, clock)
+	md := metadata.New(mongoURL)
+
 	return &Archive{
 		mt:    memtable.New(mongoURL, clock),
-		bs:    blobstore.New(bucket, clock),
-		md:    metadata.New(mongoURL),
+		bs:    bs,
+		md:    md,
 		clock: clock,
+		comp:  compactor.New(bs, md, clock),
 	}
 }
 
@@ -86,8 +92,9 @@ func (a *Archive) Get(ctx context.Context, key string) (value []byte, stats *Get
 		return nil, stats, fmt.Errorf("metadata.GetContaining: %w", err)
 	}
 
+	// note: this assumes that metas is already sorted.
 	for _, meta := range metas {
-		rec, bstats, err := a.bs.Get(ctx, meta.Filename(), key)
+		rec, bstats, err := a.bs.Find(ctx, meta.Filename(), key)
 		if err != nil {
 			return nil, stats, fmt.Errorf("blobstore.Get: %w", err)
 		}
@@ -97,6 +104,11 @@ func (a *Archive) Get(ctx context.Context, key string) (value []byte, stats *Get
 		stats.RecordsScanned += bstats.RecordsScanned
 
 		if rec != nil {
+			// return as soon as we find the first record, but that's wrong!
+			// before returning, we need to look at the record timestamp, and
+			// check whether any of the remaining metas have a minTime newer
+			// than that. this is only possible after a weird compaction.
+			// TODO: fix this!
 			stats.Source = bstats.Source
 			return rec.Document, stats, nil
 		}
@@ -177,4 +189,11 @@ func (a *Archive) Flush(ctx context.Context) (*FlushStats, error) {
 	}
 
 	return stats, nil
+}
+
+type CompactionStats = compactor.CompactionStats
+type CompactionOptions = compactor.CompactionOptions
+
+func (a *Archive) Compact(ctx context.Context, opts CompactionOptions) ([]*CompactionStats, error) {
+	return a.comp.Run(ctx, opts)
 }
