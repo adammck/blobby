@@ -33,7 +33,8 @@ func (s *Store) getMongo(ctx context.Context) (*mongo.Database, error) {
 		return s.mongo, nil
 	}
 
-	opt := options.Client().ApplyURI(s.mongoURL).SetTimeout(connectionTimeout)
+	// TODO: get rid of the SetDirect. that's just for tests. it belogns in the mongoURL.
+	opt := options.Client().ApplyURI(s.mongoURL).SetTimeout(connectionTimeout).SetDirect(true)
 	client, err := mongo.Connect(ctx, opt)
 	if err != nil {
 		return nil, err

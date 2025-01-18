@@ -128,7 +128,6 @@ func (mt *Memtable) Init(ctx context.Context) error {
 	return nil
 }
 
-// TODO: Unexport this once flush is figured out.
 func (mt *Memtable) GetMongo(ctx context.Context) (*mongo.Database, error) {
 	if mt.mongo != nil {
 		return mt.mongo, nil
@@ -144,7 +143,7 @@ func (mt *Memtable) GetMongo(ctx context.Context) (*mongo.Database, error) {
 }
 
 func connectToMongo(ctx context.Context, url string) (*mongo.Database, error) {
-	opt := options.Client().ApplyURI(url).SetTimeout(1 * time.Second)
+	opt := options.Client().ApplyURI(url).SetTimeout(10 * time.Second)
 
 	client, err := mongo.Connect(ctx, opt)
 	if err != nil {

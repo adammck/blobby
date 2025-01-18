@@ -6,16 +6,16 @@ import (
 	"time"
 
 	"github.com/adammck/archive/pkg/sstable"
-	"github.com/adammck/archive/pkg/testutil"
+	"github.com/adammck/archive/pkg/testdeps"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestInit(t *testing.T) {
 	ctx := context.Background()
-	env := testutil.SetupTest(ctx, t)
+	env := testdeps.New(ctx, t, testdeps.WithMongo())
 
-	store := New(env.MongoURL)
+	store := New(env.MongoURL())
 	err := store.Init(ctx)
 	require.NoError(t, err)
 
@@ -26,9 +26,9 @@ func TestInit(t *testing.T) {
 
 func setup(t *testing.T) (context.Context, *Store) {
 	ctx := context.Background()
-	env := testutil.SetupTest(ctx, t)
+	env := testdeps.New(ctx, t, testdeps.WithMongo())
 
-	store := New(env.MongoURL)
+	store := New(env.MongoURL())
 	err := store.Init(ctx)
 	require.NoError(t, err)
 

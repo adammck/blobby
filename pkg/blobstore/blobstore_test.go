@@ -5,16 +5,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adammck/archive/pkg/testutil"
+	"github.com/adammck/archive/pkg/testdeps"
 	"github.com/adammck/archive/pkg/types"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func setup(t *testing.T) (context.Context, *testutil.Env, *Blobstore, clockwork.Clock) {
+func setup(t *testing.T) (context.Context, *testdeps.Env, *Blobstore, clockwork.Clock) {
 	ctx := context.Background()
-	env := testutil.SetupTest(ctx, t)
+	env := testdeps.New(ctx, t, testdeps.WithMinio())
 	clock := clockwork.NewFakeClock()
 	bs := New(env.S3Bucket, clock)
 

@@ -9,22 +9,16 @@ import (
 
 	"github.com/adammck/archive/pkg/compactor"
 	"github.com/adammck/archive/pkg/sstable"
-	"github.com/adammck/archive/pkg/testutil"
+	"github.com/adammck/archive/pkg/testdeps"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 )
 
-func setup(t *testing.T) (context.Context, *testutil.Env, *Archive, *clockwork.FakeClock) {
+func setup(t *testing.T, clock clockwork.Clock) (context.Context, *testdeps.Env, *Archive) {
 	ctx := context.Background()
-	env := testutil.SetupTest(ctx, t)
+	env := testdeps.New(ctx, t, testdeps.WithMongo(), testdeps.WithMinio())
 
-	// Fix the clock to the current time, but simplify things by rounding to the
-	// previous second. BSON encoding only supports milliseconds, so we lose the
-	// nanoseconds when we round-trip through BSON, making comparisons annoying.
-	ts := time.Now().UTC().Truncate(time.Second)
-	clock := clockwork.NewFakeClockAt(ts)
-
-	arc := New(env.MongoURL, env.S3Bucket, clock)
+	arc := New(env.MongoURL(), env.S3Bucket, clock)
 
 	err := arc.Init(ctx)
 	require.NoError(t, err)
@@ -32,11 +26,18 @@ func setup(t *testing.T) (context.Context, *testutil.Env, *Archive, *clockwork.F
 	err = arc.Ping(ctx)
 	require.NoError(t, err)
 
-	return ctx, env, arc, clock
+	return ctx, env, arc
 }
 
 func TestBasicWriteRead(t *testing.T) {
-	ctx, env, a, c := setup(t)
+
+	// Fix the clock to the current time, but simplify things by rounding to the
+	// previous second. BSON encoding only supports milliseconds, so we lose the
+	// nanoseconds when we round-trip through BSON, making comparisons annoying.
+	ts := time.Now().UTC().Truncate(time.Second)
+	c := clockwork.NewFakeClockAt(ts)
+
+	ctx, env, a := setup(t, c)
 
 	// wrap archive in test helper to make this readable
 	ta := &testArchive{
@@ -68,7 +69,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats := ta.get("001")
 	require.Equal(t, val, docs["001"])
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("%s/archive/blue", env.MongoURL),
+		Source:         fmt.Sprintf("%s/archive/blue", env.MongoURL()),
 		BlobsFetched:   0,
 		RecordsScanned: 0,
 	}, gstats)
@@ -83,7 +84,7 @@ func TestBasicWriteRead(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
 		FlushedMemtable: "",
-		ActiveMemtable:  fmt.Sprintf("%s/archive/green", env.MongoURL),
+		ActiveMemtable:  fmt.Sprintf("%s/archive/green", env.MongoURL()),
 		BlobURL:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t2.Unix()),
 		Meta: &sstable.Meta{
 			MinKey:  "001",
@@ -124,7 +125,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = ta.get("015")
 	require.Equal(t, val, docs["015"])
 	require.Equal(t, &GetStats{
-		Source: fmt.Sprintf("%s/archive/green", env.MongoURL),
+		Source: fmt.Sprintf("%s/archive/green", env.MongoURL()),
 	}, gstats)
 
 	// pass some time, so the second sstable will have a different URL. (they're
@@ -138,7 +139,7 @@ func TestBasicWriteRead(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
 		FlushedMemtable: "", // TODO
-		ActiveMemtable:  fmt.Sprintf("%s/archive/blue", env.MongoURL),
+		ActiveMemtable:  fmt.Sprintf("%s/archive/blue", env.MongoURL()),
 		BlobURL:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t3.Unix()),
 		Meta: &sstable.Meta{
 			MinKey:  "011",
@@ -185,12 +186,12 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = ta.get("003")
 	require.Equal(t, val, []byte("xxx"))
 	require.Equal(t, &GetStats{
-		Source: fmt.Sprintf("%s/archive/blue", env.MongoURL),
+		Source: fmt.Sprintf("%s/archive/blue", env.MongoURL()),
 	}, gstats)
 	val, gstats = ta.get("013")
 	require.Equal(t, val, []byte("yyy"))
 	require.Equal(t, &GetStats{
-		Source: fmt.Sprintf("%s/archive/blue", env.MongoURL),
+		Source: fmt.Sprintf("%s/archive/blue", env.MongoURL()),
 	}, gstats)
 
 	// flush again. the two keys we just wrote will end up in the new sstable.
@@ -200,7 +201,7 @@ func TestBasicWriteRead(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
 		FlushedMemtable: "", // TODO
-		ActiveMemtable:  fmt.Sprintf("%s/archive/green", env.MongoURL),
+		ActiveMemtable:  fmt.Sprintf("%s/archive/green", env.MongoURL()),
 		BlobURL:         fmt.Sprintf("s3://%s/%d.sstable", env.S3Bucket, t4.Unix()),
 		Meta: &sstable.Meta{
 			MinKey:  "003",
