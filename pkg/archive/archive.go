@@ -2,6 +2,7 @@ package archive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/adammck/archive/pkg/blobstore"
@@ -78,7 +79,7 @@ func (a *Archive) Get(ctx context.Context, key string) (value []byte, stats *Get
 	stats = &GetStats{}
 
 	rec, src, err := a.mt.Get(ctx, key)
-	if err != nil {
+	if err != nil && !errors.Is(err, &memtable.NotFound{}) {
 		return nil, stats, fmt.Errorf("memtable.Get: %w", err)
 	}
 	if rec != nil {

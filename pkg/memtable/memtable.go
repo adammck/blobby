@@ -45,9 +45,10 @@ func (mt *Memtable) Get(ctx context.Context, key string) (*types.Record, string,
 	b, err := res.Raw()
 	if err != nil {
 
-		// this is actually fine
+		// return our own error, since the fact that we're wrapping mongo is an
+		// implementation detail. also our error contains the key.
 		if err == mongo.ErrNoDocuments {
-			return nil, "", nil
+			return nil, "", &NotFound{key}
 		}
 
 		return nil, "", fmt.Errorf("FindOne: %w", err)
