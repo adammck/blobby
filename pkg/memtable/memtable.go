@@ -3,7 +3,6 @@ package memtable
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"time"
 
 	"github.com/adammck/archive/pkg/types"
@@ -60,18 +59,7 @@ func (mt *Memtable) Get(ctx context.Context, key string) (*types.Record, string,
 		return nil, "", fmt.Errorf("error decoding record: %w", err)
 	}
 
-	return &rec, mt.url(c.Name()), nil
-}
-
-func (mt *Memtable) url(coll string) string {
-	u, err := url.Parse(mt.mongoURL)
-	if err != nil {
-		// extremely weird if this happens
-		// TODO: move the parse to constructor
-		return "error://error/error"
-	}
-
-	return fmt.Sprintf("%s://%s/%s/%s", u.Scheme, u.Host, mt.mongo.Name(), coll)
+	return &rec, c.Name(), nil
 }
 
 func (mt *Memtable) Put(ctx context.Context, key string, value []byte) (string, error) {
@@ -86,7 +74,7 @@ func (mt *Memtable) Put(ctx context.Context, key string, value []byte) (string, 
 		Document:  value,
 	})
 
-	return mt.url(c.Name()), err
+	return c.Name(), err
 }
 
 func (mt *Memtable) Ping(ctx context.Context) error {
@@ -218,5 +206,5 @@ func (mt *Memtable) Swap(ctx context.Context) (*Handle, string, error) {
 		return nil, "", fmt.Errorf("error updating active memtable: %w", err)
 	}
 
-	return NewHandle(db, curr), mt.url(next), nil
+	return NewHandle(db, curr), next, nil
 }

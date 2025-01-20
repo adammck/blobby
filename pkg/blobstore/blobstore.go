@@ -43,7 +43,7 @@ func (bs *Blobstore) Find(ctx context.Context, fn string, key string) (*types.Re
 
 	var rec *types.Record
 	stats := &GetStats{
-		Source: bs.url(fn),
+		Source: fn,
 	}
 
 	for {
@@ -171,11 +171,7 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (dest str
 		return "", 0, nil, fmt.Errorf("PutObject: %w", err)
 	}
 
-	return bs.url(key), n, meta, nil
-}
-
-func (bs *Blobstore) url(key string) string {
-	return fmt.Sprintf("s3://%s/%s", bs.bucket, key)
+	return key, n, meta, nil
 }
 
 func (bs *Blobstore) getS3(ctx context.Context) (*s3.Client, error) {

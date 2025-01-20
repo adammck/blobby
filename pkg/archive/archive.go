@@ -125,9 +125,11 @@ type FlushStats struct {
 	FlushedMemtable string
 
 	// The URL of the memtable that is now active, after the flush.
+	// TODO: Rename this to reflect that it's just the name now.
 	ActiveMemtable string
 
 	// The URL of the flushed sstable.
+	// TODO: Rename this to reflect that it's just the blob key (filename) now.
 	BlobURL string
 
 	// Metadata about the flushed sstable.
