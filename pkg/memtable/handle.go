@@ -22,6 +22,12 @@ func NewHandle(db *mongo.Database, name string) *Handle {
 	}
 }
 
+// Name returns the name of the collection serving this handle. This may be
+// formatted arbitrarily, and should only be used for display.
+func (h *Handle) Name() string {
+	return h.coll.Name()
+}
+
 func (h *Handle) Flush(ctx context.Context, ch chan *types.Record) error {
 	cur, err := h.coll.Find(ctx, bson.M{})
 	if err != nil {

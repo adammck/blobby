@@ -181,30 +181,35 @@ func (mt *Memtable) activeCollectionName(ctx context.Context, db *mongo.Database
 	return s, nil
 }
 
-func (mt *Memtable) Swap(ctx context.Context) (*Handle, string, error) {
+// Swap updates the active collection with the inactive collection, and returns
+// them both.
+func (mt *Memtable) Swap(ctx context.Context) (hPrev *Handle, hNext *Handle, err error) {
 	db, err := mt.GetMongo(ctx)
 	if err != nil {
-		return nil, "", err
+		return
 	}
 
-	curr, err := mt.activeCollectionName(ctx, db)
+	nPrev, err := mt.activeCollectionName(ctx, db)
 	if err != nil {
-		return nil, "", err
+		return
 	}
 
-	next := blueMemtableName
-	if curr == blueMemtableName {
-		next = greenMemtableName
+	nNext := blueMemtableName
+	if nPrev == blueMemtableName {
+		nNext = greenMemtableName
 	}
 
 	_, err = db.Collection(metaCollectionName).UpdateOne(
 		ctx,
 		bson.M{"_id": metaActiveMemtableDocID},
-		bson.M{"$set": bson.M{"value": next}},
+		bson.M{"$set": bson.M{"value": nNext}},
 	)
 	if err != nil {
-		return nil, "", fmt.Errorf("error updating active memtable: %w", err)
+		err = fmt.Errorf("error updating active memtable: %w", err)
+		return
 	}
 
-	return NewHandle(db, curr), next, nil
+	hPrev = NewHandle(db, nPrev)
+	hNext = NewHandle(db, nNext)
+	return
 }

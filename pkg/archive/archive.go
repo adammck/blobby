@@ -140,21 +140,19 @@ func (a *Archive) Flush(ctx context.Context) (*FlushStats, error) {
 	stats := &FlushStats{}
 
 	// TODO: check whether old sstable is still flushing
-	handle, mt, err := a.mt.Swap(ctx)
+	hPrev, hNext, err := a.mt.Swap(ctx)
 	if err != nil {
 		return stats, fmt.Errorf("switchMemtable: %s", err)
 	}
 
-	// TODO: fix this by moving URL from Memtable to Handle.
-	//stats.FlushedMemtable = handle.URL()
-	stats.ActiveMemtable = mt
+	stats.ActiveMemtable = hNext.Name()
 
 	ch := make(chan *types.Record)
 	g, ctx2 := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
 		var err error
-		err = handle.Flush(ctx2, ch)
+		err = hPrev.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("memtable.Flush: %w", err)
 		}
@@ -178,16 +176,21 @@ func (a *Archive) Flush(ctx context.Context) (*FlushStats, error) {
 		return stats, err
 	}
 
+	// wait until the sstable is actually readable to update the stats.
+
 	err = a.md.Insert(ctx, meta)
 	if err != nil {
+		// TODO: maybe delete the sstable(s) here, since they're orphaned.
 		return stats, fmt.Errorf("metadata.Insert: %w", err)
 	}
 
+	stats.FlushedMemtable = hPrev.Name()
 	stats.BlobURL = dest
 	stats.Meta = meta
 
-	err = handle.Truncate(ctx)
+	err = hPrev.Truncate(ctx)
 	if err != nil {
+		// TODO: this is pretty bad. the sstable is readable, but we won't be able to swap back. what to do?
 		return stats, fmt.Errorf("handle.Truncate: %w", err)
 	}
 

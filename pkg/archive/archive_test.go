@@ -82,7 +82,7 @@ func TestBasicWriteRead(t *testing.T) {
 	fstats, err := a.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
-		FlushedMemtable: "",
+		FlushedMemtable: "blue",
 		ActiveMemtable:  "green",
 		BlobURL:         fmt.Sprintf("%d.sstable", t2.Unix()),
 		Meta: &sstable.Meta{
@@ -137,7 +137,7 @@ func TestBasicWriteRead(t *testing.T) {
 	fstats, err = a.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
-		FlushedMemtable: "", // TODO
+		FlushedMemtable: "green",
 		ActiveMemtable:  "blue",
 		BlobURL:         fmt.Sprintf("%d.sstable", t3.Unix()),
 		Meta: &sstable.Meta{
@@ -199,7 +199,7 @@ func TestBasicWriteRead(t *testing.T) {
 	fstats, err = a.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
-		FlushedMemtable: "", // TODO
+		FlushedMemtable: "blue",
 		ActiveMemtable:  "green",
 		BlobURL:         fmt.Sprintf("%d.sstable", t4.Unix()),
 		Meta: &sstable.Meta{
