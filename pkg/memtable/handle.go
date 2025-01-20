@@ -7,6 +7,7 @@ import (
 	"github.com/adammck/archive/pkg/types"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type Handle struct {
@@ -71,6 +72,11 @@ func (h *Handle) Create(ctx context.Context) error {
 			{Key: "key", Value: 1},
 			{Key: "ts", Value: -1},
 		},
+		// Unlikely that two writes arrive at the exact same time, but possible,
+		// and this keeps them ordered, assuming the clock never goes backwards.
+		// (We use the client clock, not $createdAt, so we can inject a fake
+		// clock for testing.)
+		Options: options.Index().SetUnique(true),
 	})
 	if err != nil {
 		return fmt.Errorf("CreateIndex: %w", err)
