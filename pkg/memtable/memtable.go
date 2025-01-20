@@ -199,6 +199,19 @@ func (mt *Memtable) Swap(ctx context.Context) (hPrev *Handle, hNext *Handle, err
 		nNext = greenMemtableName
 	}
 
+	// check that the new collection is empty. this is not safe, because it's
+	// not transactional. but we're going to change this soon, to use new
+	// collections rather than flipping between two, so it's fine.
+	n, err := db.Collection(nNext).CountDocuments(ctx, bson.D{})
+	if err != nil {
+		err = fmt.Errorf("CountDocuments(%s): %w", nNext, err)
+		return
+	}
+	if n > 0 {
+		err = fmt.Errorf("want to activate %s, but is not empty", nNext)
+		return
+	}
+
 	_, err = db.Collection(metaCollectionName).UpdateOne(
 		ctx,
 		bson.M{"_id": metaActiveMemtableDocID},
