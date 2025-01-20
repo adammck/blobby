@@ -4,6 +4,7 @@ package compactor
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 	"time"
 
@@ -153,10 +154,10 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 		for {
 			rec, err := mr.Next()
 			if err != nil {
+				if err == io.EOF {
+					break
+				}
 				return fmt.Errorf("NewMergeReader: %w", err)
-			}
-			if rec == nil { // EOF
-				break
 			}
 			ch <- rec
 		}
