@@ -9,8 +9,9 @@ import (
 
 func TestMetaFilename(t *testing.T) {
 	meta := &Meta{
-		Created: time.Unix(1234567890, 0),
+		Created: time.Unix(1234567890, 1234999999),
 	}
 
-	assert.Equal(t, "1234567890.sstable", meta.Filename())
+	// truncated (not rounded) to milliseconds.
+	assert.Equal(t, "1234567891234.sstable", meta.Filename())
 }
