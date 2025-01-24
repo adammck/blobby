@@ -34,32 +34,101 @@ func New(mongoURL string, clock clockwork.Clock) *Memtable {
 }
 
 func (mt *Memtable) Get(ctx context.Context, key string) (*types.Record, string, error) {
-	c, err := mt.activeCollection(ctx)
+	db, err := mt.GetMongo(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("GetMongo: %w", err)
+	}
+
+	sess, err := db.Client().StartSession()
 	if err != nil {
 		return nil, "", err
 	}
+	defer sess.EndSession(ctx)
 
-	res := c.FindOne(ctx, bson.M{"key": key}, options.FindOne().SetSort(bson.M{"ts": -1}))
+	var active string
+	var recBlue, recGreen *types.Record
+
+	err = mongo.WithSession(ctx, sess, func(sctx mongo.SessionContext) error {
+		err := sess.StartTransaction()
+		if err != nil {
+			return err
+		}
+
+		active, recBlue, recGreen, err = mt.innerGet(sctx, db, key)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, "", fmt.Errorf("mongo.WithSession: %w", err)
+	}
+
+	var prio [2]string
+	switch active {
+	case blueMemtableName:
+		prio = [2]string{blueMemtableName, greenMemtableName}
+	case greenMemtableName:
+		prio = [2]string{greenMemtableName, blueMemtableName}
+	default:
+		return nil, "", fmt.Errorf("invalid active collection: %s", active)
+	}
+
+	recs := map[string]*types.Record{
+		blueMemtableName:  recBlue,
+		greenMemtableName: recGreen,
+	}
+
+	// iterate the collections in priority order. the current one first, and the
+	// inactive one after that, to capture anything which was written before the
+	// last swap, but not yet flushed to s3.
+	for _, name := range prio {
+		r, ok := recs[name]
+		if ok && r != nil {
+			return r, name, err
+		}
+	}
+
+	// not found in any collection.
+	return nil, "", &NotFound{key}
+}
+
+func (mt *Memtable) innerGet(ctx mongo.SessionContext, db *mongo.Database, key string) (string, *types.Record, *types.Record, error) {
+	active, err := mt.activeCollectionName(ctx, db)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("activeCollectionName: %w", err)
+	}
+
+	recBlue, errBlue := mt.innerGetOneCollection(ctx, db, blueMemtableName, key)
+	if errBlue != nil && errBlue != mongo.ErrNoDocuments {
+		return "", nil, nil, fmt.Errorf("innerGetOneCollection(blue): %w", err)
+	}
+
+	recGreen, err := mt.innerGetOneCollection(ctx, db, greenMemtableName, key)
+	if errBlue != nil && errBlue != mongo.ErrNoDocuments {
+		return "", nil, nil, fmt.Errorf("innerGetOneCollection(green): %w", err)
+	}
+
+	return active, recBlue, recGreen, nil
+}
+
+func (mt *Memtable) innerGetOneCollection(ctx mongo.SessionContext, db *mongo.Database, coll, key string) (*types.Record, error) {
+	res := db.Collection(coll).FindOne(ctx, bson.M{"key": key}, options.FindOne().SetSort(bson.M{"ts": -1}))
 
 	b, err := res.Raw()
 	if err != nil {
-
-		// return our own error, since the fact that we're wrapping mongo is an
-		// implementation detail. also our error contains the key.
-		if err == mongo.ErrNoDocuments {
-			return nil, "", &NotFound{key}
-		}
-
-		return nil, "", fmt.Errorf("FindOne: %w", err)
+		return nil, err
 	}
 
 	var rec types.Record
 	err = bson.Unmarshal(b, &rec)
 	if err != nil {
-		return nil, "", fmt.Errorf("error decoding record: %w", err)
+		return nil, fmt.Errorf("error decoding record: %w", err)
 	}
 
-	return &rec, c.Name(), nil
+	return &rec, nil
 }
 
 func (mt *Memtable) Put(ctx context.Context, key string, value []byte) (string, error) {
@@ -102,7 +171,6 @@ func (mt *Memtable) Init(ctx context.Context) error {
 		return fmt.Errorf("InsertOne: %w", err)
 	}
 
-	// Initialize both memtables
 	blue := NewHandle(db, blueMemtableName)
 	if err := blue.Create(ctx); err != nil {
 		return err
