@@ -95,9 +95,18 @@ func TestWriteError(t *testing.T) {
 
 func TestWriteOrder(t *testing.T) {
 	w, c := newWriter()
-	ts := c.Now()
-	w.Add(&types.Record{Key: "key2", Timestamp: ts, Document: []byte("doc2")})
-	w.Add(&types.Record{Key: "key1", Timestamp: ts, Document: []byte("doc1")})
+
+	// truncate and convert to UTC to make assertions easier, since the round-
+	// trip through BSON does this.
+	ts1 := c.Now().UTC().Truncate(time.Millisecond)
+	ts2 := ts1.Add(time.Hour)
+	ts3 := ts2.Add(time.Hour)
+
+	// add records out of order.
+	w.Add(&types.Record{Key: "key2", Timestamp: ts1, Document: []byte("k2t1")})
+	w.Add(&types.Record{Key: "key1", Timestamp: ts2, Document: []byte("k1t2")})
+	w.Add(&types.Record{Key: "key2", Timestamp: ts3, Document: []byte("k2t3")})
+	w.Add(&types.Record{Key: "key1", Timestamp: ts1, Document: []byte("k1t1")})
 
 	var buf bytes.Buffer
 	_, err := w.Write(&buf)
@@ -106,13 +115,34 @@ func TestWriteOrder(t *testing.T) {
 	r, err := NewReader(&buf)
 	require.NoError(t, err)
 
-	r1, err := r.Next()
+	rec1, err := r.Next()
 	require.NoError(t, err)
-	assert.Equal(t, "key1", r1.Key)
+	assert.Equal(t, "key1", rec1.Key)
+	assert.Equal(t, ts2, rec1.Timestamp)
+	assert.Equal(t, []byte("k1t2"), rec1.Document)
 
-	r2, err := r.Next()
+	rec2, err := r.Next()
 	require.NoError(t, err)
-	assert.Equal(t, "key2", r2.Key)
+	assert.Equal(t, "key1", rec2.Key)
+	assert.Equal(t, ts1, rec2.Timestamp)
+	assert.Equal(t, []byte("k1t1"), rec2.Document)
+
+	rec3, err := r.Next()
+	require.NoError(t, err)
+	assert.Equal(t, "key2", rec3.Key)
+	assert.Equal(t, ts3, rec3.Timestamp)
+	assert.Equal(t, []byte("k2t3"), rec3.Document)
+
+	rec4, err := r.Next()
+	require.NoError(t, err)
+	assert.Equal(t, "key2", rec4.Key)
+	assert.WithinDuration(t, ts1, rec4.Timestamp, 0)
+	assert.Equal(t, []byte("k2t1"), rec4.Document)
+
+	// EOF
+	rec5, err := r.Next()
+	require.Nil(t, err)
+	assert.Nil(t, rec5)
 }
 
 type writeFailer struct{}

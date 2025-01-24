@@ -3,7 +3,8 @@ package sstable
 import (
 	"fmt"
 	"io"
-	"sort"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/adammck/archive/pkg/types"
@@ -33,10 +34,17 @@ func (w *Writer) Write(out io.Writer) (*Meta, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	sort.Slice(w.records, func(i, j int) bool {
-		// TODO: Also sort by Timestamp! We never throw records away.
-		// This will be important when we start compacting sstables.
-		return w.records[i].Key < w.records[j].Key
+	// sort first by key, in ascending order. but within a key, sort timestamps
+	// in *descending* order, so the newest one (i.e. the highest timestamp) is
+	// first. this way, when scanning for the newest, we can as soon as we find
+	// a single key.
+	slices.SortFunc(w.records, func(a, b *types.Record) int {
+		c := strings.Compare(a.Key, b.Key)
+		if c != 0 {
+			return c
+		}
+
+		return b.Timestamp.Compare(a.Timestamp)
 	})
 
 	_, err := out.Write([]byte(magicBytes))
