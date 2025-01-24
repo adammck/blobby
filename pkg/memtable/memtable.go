@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/adammck/archive/pkg/types"
+	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	defaultDB               = "archive"
+	defaultDB               = "blobby"
 	metaCollectionName      = "meta"
 	metaActiveMemtableDocID = "active_memtable"
 	blueMemtableName        = "blue"

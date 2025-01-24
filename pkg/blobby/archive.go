@@ -1,21 +1,21 @@
-package archive
+package blobby
 
 import (
 	"context"
 	"errors"
 	"fmt"
 
-	"github.com/adammck/archive/pkg/blobstore"
-	"github.com/adammck/archive/pkg/compactor"
-	"github.com/adammck/archive/pkg/memtable"
-	"github.com/adammck/archive/pkg/metadata"
-	"github.com/adammck/archive/pkg/sstable"
-	"github.com/adammck/archive/pkg/types"
+	"github.com/adammck/blobby/pkg/blobstore"
+	"github.com/adammck/blobby/pkg/compactor"
+	"github.com/adammck/blobby/pkg/memtable"
+	"github.com/adammck/blobby/pkg/metadata"
+	"github.com/adammck/blobby/pkg/sstable"
+	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
 	"golang.org/x/sync/errgroup"
 )
 
-type Archive struct {
+type Blobby struct {
 	mt    *memtable.Memtable
 	bs    *blobstore.Blobstore
 	md    *metadata.Store
@@ -23,11 +23,11 @@ type Archive struct {
 	comp  *compactor.Compactor
 }
 
-func New(mongoURL, bucket string, clock clockwork.Clock) *Archive {
+func New(mongoURL, bucket string, clock clockwork.Clock) *Blobby {
 	bs := blobstore.New(bucket, clock)
 	md := metadata.New(mongoURL)
 
-	return &Archive{
+	return &Blobby{
 		mt:    memtable.New(mongoURL, clock),
 		bs:    bs,
 		md:    md,
@@ -36,13 +36,13 @@ func New(mongoURL, bucket string, clock clockwork.Clock) *Archive {
 	}
 }
 
-func (a *Archive) Ping(ctx context.Context) error {
-	err := a.mt.Ping(ctx)
+func (b *Blobby) Ping(ctx context.Context) error {
+	err := b.mt.Ping(ctx)
 	if err != nil {
 		return fmt.Errorf("memtable.Ping: %w", err)
 	}
 
-	err = a.bs.Ping(ctx)
+	err = b.bs.Ping(ctx)
 	if err != nil {
 		return fmt.Errorf("blobstore.Ping: %w", err)
 	}
@@ -50,13 +50,13 @@ func (a *Archive) Ping(ctx context.Context) error {
 	return nil
 }
 
-func (a *Archive) Init(ctx context.Context) error {
-	err := a.mt.Init(ctx)
+func (b *Blobby) Init(ctx context.Context) error {
+	err := b.mt.Init(ctx)
 	if err != nil {
 		return fmt.Errorf("memtable.Init: %s", err)
 	}
 
-	err = a.md.Init(ctx)
+	err = b.md.Init(ctx)
 	if err != nil {
 		return fmt.Errorf("metadata.Init: %s", err)
 	}
@@ -64,8 +64,8 @@ func (a *Archive) Init(ctx context.Context) error {
 	return nil
 }
 
-func (a *Archive) Put(ctx context.Context, key string, value []byte) (string, error) {
-	return a.mt.Put(ctx, key, value)
+func (b *Blobby) Put(ctx context.Context, key string, value []byte) (string, error) {
+	return b.mt.Put(ctx, key, value)
 }
 
 type GetStats struct {
@@ -75,10 +75,10 @@ type GetStats struct {
 }
 
 // TODO: return the Record, or maybe the timestamp too, not just the value.
-func (a *Archive) Get(ctx context.Context, key string) (value []byte, stats *GetStats, err error) {
+func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetStats, err error) {
 	stats = &GetStats{}
 
-	rec, src, err := a.mt.Get(ctx, key)
+	rec, src, err := b.mt.Get(ctx, key)
 	if err != nil && !errors.Is(err, &memtable.NotFound{}) {
 		return nil, stats, fmt.Errorf("memtable.Get: %w", err)
 	}
@@ -88,14 +88,14 @@ func (a *Archive) Get(ctx context.Context, key string) (value []byte, stats *Get
 		return rec.Document, stats, nil
 	}
 
-	metas, err := a.md.GetContaining(ctx, key)
+	metas, err := b.md.GetContaining(ctx, key)
 	if err != nil {
 		return nil, stats, fmt.Errorf("metadata.GetContaining: %w", err)
 	}
 
 	// note: this assumes that metas is already sorted.
 	for _, meta := range metas {
-		rec, bstats, err := a.bs.Find(ctx, meta.Filename(), key)
+		rec, bstats, err := b.bs.Find(ctx, meta.Filename(), key)
 		if err != nil {
 			return nil, stats, fmt.Errorf("blobstore.Get: %w", err)
 		}
@@ -136,11 +136,11 @@ type FlushStats struct {
 	Meta *sstable.Meta
 }
 
-func (a *Archive) Flush(ctx context.Context) (*FlushStats, error) {
+func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 	stats := &FlushStats{}
 
 	// TODO: check whether old sstable is still flushing
-	hPrev, hNext, err := a.mt.Swap(ctx)
+	hPrev, hNext, err := b.mt.Swap(ctx)
 	if err != nil {
 		return stats, fmt.Errorf("switchMemtable: %s", err)
 	}
@@ -164,7 +164,7 @@ func (a *Archive) Flush(ctx context.Context) (*FlushStats, error) {
 
 	g.Go(func() error {
 		var err error
-		dest, _, meta, err = a.bs.Flush(ctx2, ch)
+		dest, _, meta, err = b.bs.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}
@@ -178,7 +178,7 @@ func (a *Archive) Flush(ctx context.Context) (*FlushStats, error) {
 
 	// wait until the sstable is actually readable to update the stats.
 
-	err = a.md.Insert(ctx, meta)
+	err = b.md.Insert(ctx, meta)
 	if err != nil {
 		// TODO: maybe delete the sstable(s) here, since they're orphaned.
 		return stats, fmt.Errorf("metadata.Insert: %w", err)
@@ -200,6 +200,6 @@ func (a *Archive) Flush(ctx context.Context) (*FlushStats, error) {
 type CompactionStats = compactor.CompactionStats
 type CompactionOptions = compactor.CompactionOptions
 
-func (a *Archive) Compact(ctx context.Context, opts CompactionOptions) ([]*CompactionStats, error) {
-	return a.comp.Run(ctx, opts)
+func (b *Blobby) Compact(ctx context.Context, opts CompactionOptions) ([]*CompactionStats, error) {
+	return b.comp.Run(ctx, opts)
 }

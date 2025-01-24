@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/adammck/archive/pkg/testdeps"
+	"github.com/adammck/blobby/pkg/testdeps"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 )

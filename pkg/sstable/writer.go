@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/adammck/archive/pkg/types"
+	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
 )
 

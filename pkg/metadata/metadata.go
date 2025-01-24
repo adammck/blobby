@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/adammck/archive/pkg/sstable"
+	"github.com/adammck/blobby/pkg/sstable"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
-	defaultDB         = "archive"
+	defaultDB         = "blobby"
 	collectionName    = "sstables"
 	connectionTimeout = 3 * time.Second
 )

@@ -1,4 +1,4 @@
-package archive
+package blobby
 
 import (
 	"context"
@@ -7,26 +7,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adammck/archive/pkg/compactor"
-	"github.com/adammck/archive/pkg/sstable"
-	"github.com/adammck/archive/pkg/testdeps"
+	"github.com/adammck/blobby/pkg/compactor"
+	"github.com/adammck/blobby/pkg/sstable"
+	"github.com/adammck/blobby/pkg/testdeps"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 )
 
-func setup(t *testing.T, clock clockwork.Clock) (context.Context, *testdeps.Env, *Archive) {
+func setup(t *testing.T, clock clockwork.Clock) (context.Context, *testdeps.Env, *Blobby) {
 	ctx := context.Background()
 	env := testdeps.New(ctx, t, testdeps.WithMongo(), testdeps.WithMinio())
 
-	arc := New(env.MongoURL(), env.S3Bucket, clock)
+	b := New(env.MongoURL(), env.S3Bucket, clock)
 
-	err := arc.Init(ctx)
+	err := b.Init(ctx)
 	require.NoError(t, err)
 
-	err = arc.Ping(ctx)
+	err = b.Ping(ctx)
 	require.NoError(t, err)
 
-	return ctx, env, arc
+	return ctx, env, b
 }
 
 func TestBasicWriteRead(t *testing.T) {
@@ -36,13 +36,13 @@ func TestBasicWriteRead(t *testing.T) {
 	// nanoseconds when we round-trip through BSON, making comparisons annoying.
 	ts := time.Now().UTC().Truncate(time.Second)
 	c := clockwork.NewFakeClockAt(ts)
-	ctx, _, a := setup(t, c)
+	ctx, _, b := setup(t, c)
 
-	// wrap archive in test helper to make this readable
-	ta := &testArchive{
+	// wrap blobby in test helper to make this readable
+	tb := &testBlobby{
 		ctx: ctx,
 		t:   t,
-		a:   a,
+		b:   b,
 	}
 
 	// -------------------------------------- part one: inserts and flushes ----
@@ -60,12 +60,12 @@ func TestBasicWriteRead(t *testing.T) {
 
 		k := fmt.Sprintf("%03d", i)
 		docs[k] = []byte(strings.Repeat(k, 3))
-		ta.put(k, docs[k])
+		tb.put(k, docs[k])
 	}
 
 	// fetch an arbitrary key. they're all sitting in the default memtable
 	// because we haven't flushed anything.
-	val, gstats := ta.get("001")
+	val, gstats := tb.get("001")
 	require.Equal(t, val, docs["001"])
 	require.Equal(t, &GetStats{
 		Source:         "blue",
@@ -74,12 +74,12 @@ func TestBasicWriteRead(t *testing.T) {
 	}, gstats)
 
 	// and another one
-	val, _ = ta.get("005")
+	val, _ = tb.get("005")
 	require.Equal(t, val, docs["005"])
 
 	// flush memtable to the blobstore
 	t2 := c.Now()
-	fstats, err := a.Flush(ctx)
+	fstats, err := b.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
 		FlushedMemtable: "blue",
@@ -97,7 +97,7 @@ func TestBasicWriteRead(t *testing.T) {
 	}, fstats)
 
 	// fetch the same key, and see that it's now read from the blobstore.
-	val, gstats = ta.get("001")
+	val, gstats = tb.get("001")
 	require.Equal(t, val, docs["001"])
 	require.Equal(t, &GetStats{
 		Source:         fmt.Sprintf("%d.sstable", t2.Unix()),
@@ -106,7 +106,7 @@ func TestBasicWriteRead(t *testing.T) {
 	}, gstats)
 
 	// fetch the other one to show how inefficient our linear scan is. yikes.
-	val, gstats = ta.get("005")
+	val, gstats = tb.get("005")
 	require.Equal(t, val, docs["005"])
 	require.Equal(t, gstats.RecordsScanned, 5)
 
@@ -117,11 +117,11 @@ func TestBasicWriteRead(t *testing.T) {
 
 		k := fmt.Sprintf("%03d", i)
 		docs[k] = []byte(strings.Repeat(k, 3))
-		ta.put(k, docs[k])
+		tb.put(k, docs[k])
 	}
 
 	// fetch one of the new keys. it's in the other memtable.
-	val, gstats = ta.get("015")
+	val, gstats = tb.get("015")
 	require.Equal(t, val, docs["015"])
 	require.Equal(t, &GetStats{
 		Source: "green",
@@ -134,7 +134,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// flush again. note that the keys in this sstable are totally disjoint from
 	// the first.
 	t3 := c.Now()
-	fstats, err = a.Flush(ctx)
+	fstats, err = b.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
 		FlushedMemtable: "green",
@@ -153,14 +153,14 @@ func TestBasicWriteRead(t *testing.T) {
 
 	// fetch two keys, to show that they're in the different sstables, but that
 	// we only needed to fetch one of them for each get.
-	val, gstats = ta.get("002")
+	val, gstats = tb.get("002")
 	require.Equal(t, val, docs["002"])
 	require.Equal(t, &GetStats{
 		Source:         fmt.Sprintf("%d.sstable", t2.Unix()),
 		BlobsFetched:   1,
 		RecordsScanned: 2,
 	}, gstats)
-	val, gstats = ta.get("014")
+	val, gstats = tb.get("014")
 	require.Equal(t, val, docs["014"])
 	require.Equal(t, &GetStats{
 		Source:         fmt.Sprintf("%d.sstable", t3.Unix()),
@@ -175,19 +175,19 @@ func TestBasicWriteRead(t *testing.T) {
 	// TODO: PutStats
 
 	c.Advance(15 * time.Millisecond)
-	ta.put("003", []byte("xxx"))
+	tb.put("003", []byte("xxx"))
 
 	c.Advance(15 * time.Millisecond)
-	ta.put("013", []byte("yyy"))
+	tb.put("013", []byte("yyy"))
 
 	// fetch them to show that we're reading from the memtable, and getting the
 	// new values back. the values in the sstables are masked.
-	val, gstats = ta.get("003")
+	val, gstats = tb.get("003")
 	require.Equal(t, val, []byte("xxx"))
 	require.Equal(t, &GetStats{
 		Source: "blue",
 	}, gstats)
-	val, gstats = ta.get("013")
+	val, gstats = tb.get("013")
 	require.Equal(t, val, []byte("yyy"))
 	require.Equal(t, &GetStats{
 		Source: "blue",
@@ -196,7 +196,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// flush again. the two keys we just wrote will end up in the new sstable.
 	c.Advance(1 * time.Hour)
 	t4 := c.Now()
-	fstats, err = a.Flush(ctx)
+	fstats, err = b.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
 		FlushedMemtable: "blue",
@@ -222,7 +222,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// need to fetch one sstable, because we start at the newest one, and that
 	// we only need to scan through a single record, since not all keys are
 	// present.
-	val, gstats = ta.get("003")
+	val, gstats = tb.get("003")
 	require.Equal(t, val, []byte("xxx"))
 	require.Equal(t, &GetStats{
 		Source:         fmt.Sprintf("%d.sstable", t4.Unix()),
@@ -232,7 +232,7 @@ func TestBasicWriteRead(t *testing.T) {
 
 	// now fetch a key which is in the oldest sstable, and outside of the key
 	// range of the sstable we just wrote. we can still do this in one fetch.
-	val, gstats = ta.get("002")
+	val, gstats = tb.get("002")
 	require.Equal(t, val, docs["002"])
 	require.Equal(t, &GetStats{
 		Source:         fmt.Sprintf("%d.sstable", t2.Unix()),
@@ -248,7 +248,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// later, we'll optimize this with bloom filters, so we can often skip the
 	// first fetch. not implemented yet. we'll also index them, so we can fetch
 	// a subset of keys, but that's also not implemented.
-	val, gstats = ta.get("012")
+	val, gstats = tb.get("012")
 	require.Equal(t, val, docs["012"])
 	require.Equal(t, &GetStats{
 		Source:         fmt.Sprintf("%d.sstable", t3.Unix()),
@@ -261,7 +261,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// perform a full compaction. every sstable merged into one.
 	c.Advance(1 * time.Hour)
 	t5 := c.Now()
-	cstats, err := a.Compact(ctx, CompactionOptions{})
+	cstats, err := b.Compact(ctx, CompactionOptions{})
 	require.NoError(t, err)
 	require.Len(t, cstats, 1)
 	require.NoError(t, cstats[0].Error)
@@ -286,7 +286,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// read one of our previously-read keys. note that it is read out of the new
 	// blob, which was output by the compaction, and that only a single blob was
 	// fetched and scanned.
-	val, gstats = ta.get("003")
+	val, gstats = tb.get("003")
 	require.Equal(t, []byte("xxx"), val)
 	require.Equal(t, &GetStats{
 		Source:         fmt.Sprintf("%d.sstable", t5.Unix()),
@@ -295,7 +295,7 @@ func TestBasicWriteRead(t *testing.T) {
 	}, gstats)
 
 	// and another one. same source.
-	val, gstats = ta.get("013")
+	val, gstats = tb.get("013")
 	require.Equal(t, []byte("yyy"), val)
 	require.Equal(t, &GetStats{
 		Source:         fmt.Sprintf("%d.sstable", t5.Unix()),
@@ -305,7 +305,7 @@ func TestBasicWriteRead(t *testing.T) {
 
 	// check that the old sstables were deleted.
 	for _, tt := range []time.Time{t2, t3, t4} {
-		_, _, err = a.bs.Find(ctx, fmt.Sprintf("%d.sstable", tt.Unix()), "001")
+		_, _, err = b.bs.Find(ctx, fmt.Sprintf("%d.sstable", tt.Unix()), "001")
 		require.Error(t, err)
 	}
 
@@ -313,40 +313,40 @@ func TestBasicWriteRead(t *testing.T) {
 
 	// write some new records that won't overlap with any other keys
 	c.Advance(15 * time.Millisecond)
-	ta.put("101", []byte("a1"))
+	tb.put("101", []byte("a1"))
 	c.Advance(15 * time.Millisecond)
-	ta.put("102", []byte("a2"))
+	tb.put("102", []byte("a2"))
 
 	// flush to create second sstable
 	c.Advance(1 * time.Hour)
 	t6 := c.Now()
-	fstats, err = a.Flush(ctx)
+	fstats, err = b.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 2, fstats.Meta.Count)
 
 	// write more records
 	c.Advance(15 * time.Millisecond)
-	ta.put("201", []byte("b1"))
+	tb.put("201", []byte("b1"))
 	c.Advance(15 * time.Millisecond)
-	ta.put("202", []byte("b2"))
+	tb.put("202", []byte("b2"))
 
 	// flush to create third sstable
 	c.Advance(1 * time.Hour)
 	t7 := c.Now()
-	fstats, err = a.Flush(ctx)
+	fstats, err = b.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 2, fstats.Meta.Count)
 
 	// write final records
 	c.Advance(15 * time.Millisecond)
-	ta.put("301", []byte("c1"))
+	tb.put("301", []byte("c1"))
 	c.Advance(15 * time.Millisecond)
-	ta.put("302", []byte("c2"))
+	tb.put("302", []byte("c2"))
 
 	// flush to create fourth sstable
 	c.Advance(1 * time.Hour)
 	t8 := c.Now()
-	fstats, err = a.Flush(ctx)
+	fstats, err = b.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 2, fstats.Meta.Count)
 
@@ -359,7 +359,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// compact only the two newest files together
 	c.Advance(1 * time.Hour)
 	t9 := c.Now()
-	cstats, err = a.Compact(ctx, CompactionOptions{
+	cstats, err = b.Compact(ctx, CompactionOptions{
 		Order:    compactor.NewestFirst,
 		MaxFiles: 2,
 	})
@@ -385,7 +385,7 @@ func TestBasicWriteRead(t *testing.T) {
 	}, cstats[0].Outputs[0])
 
 	// verify we can read from the newly compacted file
-	val, gstats = ta.get("301")
+	val, gstats = tb.get("301")
 	require.Equal(t, []byte("c1"), val)
 	require.Equal(t, &GetStats{
 		Source:         fmt.Sprintf("%d.sstable", t9.Unix()),
@@ -394,14 +394,14 @@ func TestBasicWriteRead(t *testing.T) {
 	}, gstats)
 
 	// verify the old uncompacted sstables still exist
-	_, _, err = a.bs.Find(ctx, fmt.Sprintf("%d.sstable", t5.Unix()), "001")
+	_, _, err = b.bs.Find(ctx, fmt.Sprintf("%d.sstable", t5.Unix()), "001")
 	require.NoError(t, err)
-	_, _, err = a.bs.Find(ctx, fmt.Sprintf("%d.sstable", t6.Unix()), "101")
+	_, _, err = b.bs.Find(ctx, fmt.Sprintf("%d.sstable", t6.Unix()), "101")
 	require.NoError(t, err)
 
 	// verify the compacted sstables were deleted
 	for _, tt := range []time.Time{t7, t8} {
-		_, _, err = a.bs.Find(ctx, fmt.Sprintf("%d.sstable", tt.Unix()), "001")
+		_, _, err = b.bs.Find(ctx, fmt.Sprintf("%d.sstable", tt.Unix()), "001")
 		require.Error(t, err)
 	}
 
@@ -411,20 +411,20 @@ func TestBasicWriteRead(t *testing.T) {
 	//  - [201, 302] at t9
 }
 
-type testArchive struct {
+type testBlobby struct {
 	ctx context.Context
 	t   *testing.T
-	a   *Archive
+	b   *Blobby
 }
 
-func (ta *testArchive) put(key string, val []byte) string {
-	dest, err := ta.a.Put(ta.ctx, key, val)
+func (ta *testBlobby) put(key string, val []byte) string {
+	dest, err := ta.b.Put(ta.ctx, key, val)
 	require.NoError(ta.t, err)
 	return dest
 }
 
-func (ta *testArchive) get(key string) ([]byte, *GetStats) {
-	val, stats, err := ta.a.Get(ta.ctx, key)
+func (ta *testBlobby) get(key string) ([]byte, *GetStats) {
+	val, stats, err := ta.b.Get(ta.ctx, key)
 	require.NoError(ta.t, err)
 	return val, stats
 }

@@ -1,4 +1,4 @@
-package archive
+package blobby
 
 import (
 	"context"
@@ -7,14 +7,14 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/adammck/archive/pkg/blobstore"
+	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 )
 
 // Note: Use bin/chaostest to run this. It's pretty slow.
 func TestChaos(t *testing.T) {
-	ctx, _, arc := setup(t, clockwork.NewRealClock())
+	ctx, _, b := setup(t, clockwork.NewRealClock())
 
 	state := &testState{
 		values: make(map[string][]byte),
@@ -24,7 +24,7 @@ func TestChaos(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		key := fmt.Sprintf("key-%04d", i)
 		val := []byte(fmt.Sprintf("value-%04d-v1", i))
-		err := putOp{key: key, value: val}.run(t, ctx, arc, state)
+		err := putOp{key: key, value: val}.run(t, ctx, b, state)
 		require.NoError(t, err)
 	}
 
@@ -58,14 +58,14 @@ func TestChaos(t *testing.T) {
 		}
 
 		t.Logf("Op %d: %s", i+1, op)
-		err := op.run(t, ctx, arc, state)
+		err := op.run(t, ctx, b, state)
 		require.NoError(t, err)
 	}
 
 	t.Log("Verifying final state...")
 	var verified int
 	for key, expected := range state.values {
-		actual, stats, err := arc.Get(ctx, key)
+		actual, stats, err := b.Get(ctx, key)
 		require.NoError(t, err)
 		require.Equal(t, expected, actual,
 			"key %s: expected %q, got %q from %s",
@@ -76,7 +76,7 @@ func TestChaos(t *testing.T) {
 }
 
 type operation interface {
-	run(t *testing.T, ctx context.Context, arc *Archive, state *testState) error
+	run(t *testing.T, ctx context.Context, b *Blobby, state *testState) error
 	String() string
 }
 
@@ -111,8 +111,8 @@ func (o putOp) String() string {
 	return fmt.Sprintf("put %s=%q", o.key, o.value)
 }
 
-func (o putOp) run(t *testing.T, ctx context.Context, arc *Archive, state *testState) error {
-	dest, err := arc.Put(ctx, o.key, o.value)
+func (o putOp) run(t *testing.T, ctx context.Context, b *Blobby, state *testState) error {
+	dest, err := b.Put(ctx, o.key, o.value)
 	if err != nil {
 		return fmt.Errorf("put: %v", err)
 	}
@@ -129,9 +129,9 @@ func (o getOp) String() string {
 	return fmt.Sprintf("get %s", o.key)
 }
 
-func (o getOp) run(t *testing.T, ctx context.Context, arc *Archive, state *testState) error {
+func (o getOp) run(t *testing.T, ctx context.Context, b *Blobby, state *testState) error {
 	expected, exists := state.values[o.key]
-	actual, stats, err := arc.Get(ctx, o.key)
+	actual, stats, err := b.Get(ctx, o.key)
 	if err != nil {
 		return fmt.Errorf("get: %v", err)
 	}
@@ -160,8 +160,8 @@ func (o flushOp) String() string {
 	return "flush"
 }
 
-func (o flushOp) run(t *testing.T, ctx context.Context, arc *Archive, state *testState) error {
-	stats, err := arc.Flush(ctx)
+func (o flushOp) run(t *testing.T, ctx context.Context, b *Blobby, state *testState) error {
+	stats, err := b.Flush(ctx)
 	if err != nil {
 		// special case. it's fine if there's nothing to flush.
 		if errors.Is(err, blobstore.NoRecords) {
@@ -182,8 +182,8 @@ func (o compactOp) String() string {
 	return "compact"
 }
 
-func (o compactOp) run(t *testing.T, ctx context.Context, arc *Archive, state *testState) error {
-	stats, err := arc.Compact(ctx, CompactionOptions{})
+func (o compactOp) run(t *testing.T, ctx context.Context, b *Blobby, state *testState) error {
+	stats, err := b.Compact(ctx, CompactionOptions{})
 	if err != nil {
 		return fmt.Errorf("compact: %v", err)
 	}

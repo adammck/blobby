@@ -1,4 +1,4 @@
-module github.com/adammck/archive
+module github.com/adammck/blobby
 
 go 1.23.2
 

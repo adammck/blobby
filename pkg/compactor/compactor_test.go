@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adammck/archive/pkg/sstable"
+	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/stretchr/testify/require"
 )
 

@@ -10,8 +10,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/adammck/archive/pkg/archive"
-	"github.com/adammck/archive/pkg/compactor"
+	"github.com/adammck/blobby/pkg/blobby"
+	"github.com/adammck/blobby/pkg/compactor"
 	"github.com/jonboulle/clockwork"
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -20,7 +20,7 @@ func main() {
 	ctx := context.Background()
 
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: archive <command> [arguments]")
+		fmt.Println("Usage: blobby <command> [arguments]")
 		os.Exit(1)
 	}
 
@@ -37,24 +37,24 @@ func main() {
 		log.Fatalf("Required: S3_BUCKET")
 	}
 
-	arc := archive.New(mongoURL, bucket, clockwork.NewRealClock())
+	b := blobby.New(mongoURL, bucket, clockwork.NewRealClock())
 
-	err := arc.Ping(ctx)
+	err := b.Ping(ctx)
 	if err != nil {
-		log.Fatalf("archive.Ping: %v", err)
+		log.Fatalf("blobby.Ping: %v", err)
 	}
 
 	switch cmd {
 	case "init":
-		cmdInit(ctx, arc)
+		cmdInit(ctx, b)
 	case "put":
-		cmdPut(ctx, arc, os.Stdin)
+		cmdPut(ctx, b, os.Stdin)
 	case "get":
-		cmdGet(ctx, arc, os.Args[2])
+		cmdGet(ctx, b, os.Args[2])
 	case "flush":
-		cmdFlush(ctx, arc)
+		cmdFlush(ctx, b)
 	case "compact":
-		cmdCompact(ctx, arc, bucket)
+		cmdCompact(ctx, b, bucket)
 	default:
 		log.Fatalf("Unknown command: %s", cmd)
 	}
@@ -70,7 +70,7 @@ type compactFlags struct {
 	maxTime  string
 }
 
-func cmdCompact(ctx context.Context, arc *archive.Archive, bucket string) {
+func cmdCompact(ctx context.Context, b *blobby.Blobby, bucket string) {
 	flags := flag.NewFlagSet("compact", flag.ExitOnError)
 	cf := compactFlags{}
 
@@ -125,7 +125,7 @@ func cmdCompact(ctx context.Context, arc *archive.Archive, bucket string) {
 		opts.MaxTime = t
 	}
 
-	stats, err := arc.Compact(ctx, opts)
+	stats, err := b.Compact(ctx, opts)
 	if err != nil {
 		log.Fatalf("Compact: %v", err)
 	}
@@ -145,16 +145,16 @@ func cmdCompact(ctx context.Context, arc *archive.Archive, bucket string) {
 	}
 }
 
-func cmdInit(ctx context.Context, arc *archive.Archive) {
-	err := arc.Init(ctx)
+func cmdInit(ctx context.Context, b *blobby.Blobby) {
+	err := b.Init(ctx)
 	if err != nil {
-		log.Fatalf("archive.Init: %s", err)
+		log.Fatalf("blobby.Init: %s", err)
 	}
 
 	fmt.Println("OK")
 }
 
-func cmdPut(ctx context.Context, arc *archive.Archive, r io.Reader) {
+func cmdPut(ctx context.Context, b *blobby.Blobby, r io.Reader) {
 	n := 0
 	var dest string
 	dec := json.NewDecoder(r)
@@ -174,12 +174,12 @@ func cmdPut(ctx context.Context, arc *archive.Archive, r io.Reader) {
 		}
 		k := fmt.Sprintf("%v", id)
 
-		b, err := bson.Marshal(doc)
+		bb, err := bson.Marshal(doc)
 		if err != nil {
 			log.Fatalf("bson.Marshal: %s", err)
 		}
 
-		dest, err = arc.Put(ctx, k, b)
+		dest, err = b.Put(ctx, k, bb)
 		if err != nil {
 			log.Fatalf("Put: %s", err)
 		}
@@ -190,14 +190,14 @@ func cmdPut(ctx context.Context, arc *archive.Archive, r io.Reader) {
 	fmt.Printf("Wrote %d documents to: %s\n", n, dest)
 }
 
-func cmdGet(ctx context.Context, arc *archive.Archive, key string) {
-	b, stats, err := arc.Get(ctx, key)
+func cmdGet(ctx context.Context, b *blobby.Blobby, key string) {
+	bb, stats, err := b.Get(ctx, key)
 	if err != nil {
 		log.Fatalf("Get: %s", err)
 	}
 
 	o := map[string]interface{}{}
-	err = bson.Unmarshal(b, &o)
+	err = bson.Unmarshal(bb, &o)
 	if err != nil {
 		log.Fatalf("bson.Unmarshal: %s", err)
 	}
@@ -212,8 +212,8 @@ func cmdGet(ctx context.Context, arc *archive.Archive, key string) {
 	fmt.Printf("%s\n", out)
 }
 
-func cmdFlush(ctx context.Context, arc *archive.Archive) {
-	stats, err := arc.Flush(ctx)
+func cmdFlush(ctx context.Context, b *blobby.Blobby) {
+	stats, err := b.Flush(ctx)
 	if err != nil {
 		log.Fatalf("Flush: %s", err)
 	}

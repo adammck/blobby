@@ -8,10 +8,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/adammck/archive/pkg/blobstore"
-	"github.com/adammck/archive/pkg/metadata"
-	"github.com/adammck/archive/pkg/sstable"
-	"github.com/adammck/archive/pkg/types"
+	"github.com/adammck/blobby/pkg/blobstore"
+	"github.com/adammck/blobby/pkg/metadata"
+	"github.com/adammck/blobby/pkg/sstable"
+	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
 	"golang.org/x/sync/errgroup"
 )

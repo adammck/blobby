@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adammck/archive/pkg/sstable"
-	"github.com/adammck/archive/pkg/testdeps"
+	"github.com/adammck/blobby/pkg/sstable"
+	"github.com/adammck/blobby/pkg/testdeps"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

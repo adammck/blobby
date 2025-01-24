@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/adammck/archive/pkg/sstable"
-	"github.com/adammck/archive/pkg/types"
+	"github.com/adammck/blobby/pkg/sstable"
+	"github.com/adammck/blobby/pkg/types"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"

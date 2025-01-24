@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/adammck/archive/pkg/types"
+	"github.com/adammck/blobby/pkg/types"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

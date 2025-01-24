@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/adammck/archive/pkg/types"
+	"github.com/adammck/blobby/pkg/types"
 )
 
 type MergeReader struct {

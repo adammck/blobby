@@ -1,8 +1,8 @@
-# Archive
+# Blobby
 
-This is my LSM-tree-on-blob-store. There are many like it, but this one is mine.
-Don't expect much, I'm just having a bit of fun. Use something like [SlateDB][]
-if you need this for real.
+This is my key-val store on a blob store. There are many like it, but this one
+is mine. Don't expect much, I'm just having a bit of fun. Use something like
+[SlateDB][] if you need this for real.
 
 ## Usage
 
@@ -16,14 +16,14 @@ $ export S3_BUCKET="bucket-whatever"
 Initialize the datastore(s):
 
 ```console
-$ ./archive init
+$ ./blobby init
 OK
 ```
 
 Write some stuff to the memtable:
 
 ```console
-$ ./archive put << EOF
+$ ./blobby put << EOF
 {"_id": 1, "name": "pikachu"}
 {"_id": 2, "name": "bulbasaur"}
 {"_id": 3, "name": "charmander"}
@@ -35,7 +35,7 @@ Wrote 4 documents to mongodb://localhost:27017/db-whatever/blue
 Flush the memtable to the blob store:
 
 ```console
-$ ./archive flush
+$ ./blobby flush
 Flushed 3 documents to: s3://bucket-whatever/L1/1736476581.sstable
 Active memtable is now: mongodb://localhost:27017/db-whatever/green
 ```
@@ -43,7 +43,7 @@ Active memtable is now: mongodb://localhost:27017/db-whatever/green
 Read a document:
 
 ```console
-$ ./archive get 2
+$ ./blobby get 2
 Got 1 document from s3://bucket-whatever/L1/1736476581.sstable
 {"_id": 2, "name": "bulbasaur"}
 ```
@@ -51,14 +51,14 @@ Got 1 document from s3://bucket-whatever/L1/1736476581.sstable
 Write a new version of that document:
 
 ```console
-$ echo '{"_id": 2, "name": "bulbasaur", "trainer": "ash"}' | ./archive put
+$ echo '{"_id": 2, "name": "bulbasaur", "trainer": "ash"}' | ./blobby put
 Wrote 1 document to mongodb://localhost:27017/db-whatever/green
 ```
 
 Read it again:
 
 ```console
-$ ./archive get 2
+$ ./blobby get 2
 Got 1 document from mongodb://localhost:27017/db-whatever/green
 {"_id": 2, "name": "bulbasaur", "trainer": "ash"}
 ```
@@ -66,7 +66,7 @@ Got 1 document from mongodb://localhost:27017/db-whatever/green
 Compact all sstables into one:
 
 ```console
-$ ./archive compact
+$ ./blobby compact
 Compaction 1:
   Input files: 4
   Output files: 1
@@ -76,7 +76,7 @@ Compaction 1:
 Compact sstables together until they reach 1MB:
 
 ```console
-$ ./archive compact --order smallest-first --min-files 8 --max-size 1048576
+$ ./blobby compact --order smallest-first --min-files 8 --max-size 1048576
 Compaction 1:
   Input files: 8
   Output files: 1
