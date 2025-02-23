@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/jonboulle/clockwork"
@@ -108,6 +109,10 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 		default:
 			op = compactOp{}
 		}
+
+		// delay a bit to avoid collisions, because millisecond resolution.
+		// TODO: remove this stupid hack, use automatic backoff and retry.
+		time.Sleep(1 * time.Millisecond)
 
 		t.Logf("Op %d: %s", i+1, op)
 		err := op.run(t, ctx, b, state)
