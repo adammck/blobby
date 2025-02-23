@@ -3,6 +3,7 @@ package blobby
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -12,83 +13,96 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type ChaosTestConfig struct {
-	// Number of keys to create initially
-	InitCount int
+var (
+	initCount = flag.Int("initcount", 1000, "number of keys to create initially")
+	numOps    = flag.Int("numops", 3000, "number of operations to perform")
 
-	// Number of operations to perform
-	NumOps int
+	pGet     = flag.Int("pget", 70, "probability of get")
+	pPut     = flag.Int("pput", 20, "probability of put")
+	pFlush   = flag.Int("pflush", 8, "probability of flush")
+	pCompact = flag.Int("pcompact", 2, "probability of compaction")
 
-	// Probability of each operation occuring
-	PGet     int
-	PPut     int
-	PFlush   int
-	PCompact int
+	pHot  = flag.Int("phot", 50, "probability of hot key")
+	pWarm = flag.Int("pwarm", 30, "probability of warm key")
+	pCold = flag.Int("pcold", 20, "probability of cold key")
 
-	// Probability of selecting from each key distribution
-	PHot  int
-	PWarm int
-	PCold int
+	nHot  = flag.Int("nhot", 10, "number of hot keys")
+	nWarm = flag.Int("nwarm", 90, "number of warm keys")
+	nCold = flag.Int("ncold", 900, "number of cold keys")
+)
 
-	// Number of keys in each distribution
-	HotKeys  int
-	WarmKeys int
-	ColdKeys int
+func TestMain(m *testing.M) {
+	flag.Parse()
+	m.Run()
 }
 
-// Note: Use bin/chaostest to run this. It's pretty slow.
+// see flags above for docs.
+type chaosTestConfig struct {
+	initCount int
+	numOps    int
+	pGet      int
+	pPut      int
+	pFlush    int
+	pCompact  int
+	pHot      int
+	pWarm     int
+	pCold     int
+	nHot      int
+	nWarm     int
+	nCold     int
+}
+
+func configFromFlags() chaosTestConfig {
+	return chaosTestConfig{
+		initCount: *initCount,
+		numOps:    *numOps,
+		pGet:      *pGet,
+		pPut:      *pPut,
+		pFlush:    *pFlush,
+		pCompact:  *pCompact,
+		pHot:      *pHot,
+		pWarm:     *pWarm,
+		pCold:     *pCold,
+		nHot:      *nHot,
+		nWarm:     *nWarm,
+		nCold:     *nCold,
+	}
+}
+
 func TestChaos(t *testing.T) {
 	ctx, _, b := setup(t, clockwork.NewRealClock())
-
-	config := ChaosTestConfig{
-		InitCount: 1000,
-		NumOps:    3000,
-		PGet:      70,
-		PPut:      20,
-		PFlush:    8,
-		PCompact:  2,
-
-		// Key distribution config (matches original behavior)
-		PHot:     50,  // 50% of ops
-		PWarm:    30,  // 30% of ops
-		PCold:    20,  // 20% of ops
-		HotKeys:  10,  // first 10 keys
-		WarmKeys: 90,  // next 90 keys
-		ColdKeys: 900, // remaining 900 keys
-	}
-
-	runChaosTest(t, ctx, b, config)
+	runChaosTest(t, ctx, b, configFromFlags())
 }
 
-func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg ChaosTestConfig) {
+func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestConfig) {
 	state := &testState{
 		values: make(map[string][]byte),
 	}
 
 	t.Log("Creating initial dataset...")
-	for i := range cfg.InitCount {
+	for i := range cfg.initCount {
 		key := fmt.Sprintf("key-%04d", i)
-		val := []byte(fmt.Sprintf("value-%04d-v1", i))
+		val := fmt.Appendf(nil, "value-%04d-v1", i)
 		err := putOp{key: key, value: val}.run(t, ctx, b, state)
 		require.NoError(t, err)
 	}
 
-	t.Logf("Spamming %d random ops....", cfg.NumOps)
-	totalOps := cfg.PGet + cfg.PPut + cfg.PFlush + cfg.PCompact
-	for i := range cfg.NumOps {
+	t.Logf("Spamming %d random ops....", cfg.numOps)
+	totalOps := cfg.pGet + cfg.pPut + cfg.pFlush + cfg.pCompact
+	for i := range cfg.numOps {
 		var op operation
 		p := rand.Intn(totalOps)
 
 		switch {
-		case p < cfg.PGet:
+		case p < cfg.pGet:
 			op = getOp{key: selectKey(cfg)}
 
-		case p < cfg.PGet+cfg.PPut:
+		case p < cfg.pGet+cfg.pPut:
 			key := selectKey(cfg)
 			val := fmt.Appendf(nil, "value-%s-v%d", key, rand.Int())
 			op = putOp{key: key, value: val}
 
-		case p < cfg.PGet+cfg.PPut+cfg.PFlush:
+		case p < cfg.pGet+cfg.pPut+cfg.pFlush:
 			op = flushOp{}
 
 		default:
@@ -122,17 +136,17 @@ type testState struct {
 	values map[string][]byte
 }
 
-func selectKey(cfg ChaosTestConfig) string {
-	p := rand.Intn(cfg.PHot + cfg.PWarm + cfg.PCold)
+func selectKey(cfg chaosTestConfig) string {
+	p := rand.Intn(cfg.pHot + cfg.pWarm + cfg.pCold)
 	switch {
-	case p < cfg.PHot:
-		return fmt.Sprintf("key-%04d", rand.Intn(cfg.HotKeys))
+	case p < cfg.pHot:
+		return fmt.Sprintf("key-%04d", rand.Intn(cfg.nHot))
 
-	case p < cfg.PHot+cfg.PWarm:
-		return fmt.Sprintf("key-%04d", rand.Intn(cfg.WarmKeys)+cfg.HotKeys)
+	case p < cfg.pHot+cfg.pWarm:
+		return fmt.Sprintf("key-%04d", rand.Intn(cfg.nWarm)+cfg.nHot)
 
 	default:
-		return fmt.Sprintf("key-%04d", rand.Intn(cfg.ColdKeys)+cfg.HotKeys+cfg.WarmKeys)
+		return fmt.Sprintf("key-%04d", rand.Intn(cfg.nCold)+cfg.nHot+cfg.nWarm)
 	}
 }
 
