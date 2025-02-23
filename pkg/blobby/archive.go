@@ -151,8 +151,7 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 	g, ctx2 := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		var err error
-		err = hPrev.Flush(ctx2, ch)
+		err := hPrev.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("memtable.Flush: %w", err)
 		}
