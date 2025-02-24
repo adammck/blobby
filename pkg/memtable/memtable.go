@@ -3,6 +3,7 @@ package memtable
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/adammck/blobby/pkg/types"
@@ -18,6 +19,12 @@ const (
 	metaActiveMemtableDocID = "active_memtable"
 	blueMemtableName        = "blue"
 	greenMemtableName       = "green"
+
+	// How long to sleep before retrying a failed insert. This must be more than
+	// a millisecond, because that's the resolution of BSON timestamps which we
+	// use for ordering.
+	retrySleep  = 1 * time.Millisecond
+	retryJitter = 100 * time.Microsecond // 0.1ms
 )
 
 type Memtable struct {
@@ -137,13 +144,28 @@ func (mt *Memtable) Put(ctx context.Context, key string, value []byte) (string, 
 		return "", err
 	}
 
-	_, err = c.InsertOne(ctx, &types.Record{
-		Key:       key,
-		Timestamp: mt.clock.Now(),
-		Document:  value,
-	})
+	for {
+		_, err = c.InsertOne(ctx, &types.Record{
+			Key:       key,
+			Timestamp: mt.clock.Now(),
+			Document:  value,
+		})
+		if err == nil {
+			break
+		}
 
-	return c.Name(), err
+		// sleep and retry to get a new timestamp. it's almost certainly been
+		// long enough already, but this makes testing easier.
+		if mongo.IsDuplicateKeyError(err) {
+			jitter := time.Duration(rand.Int63n(retryJitter.Nanoseconds()))
+			mt.clock.Sleep(retrySleep + jitter)
+			continue
+		}
+
+		return "", err
+	}
+
+	return c.Name(), nil
 }
 
 func (mt *Memtable) Ping(ctx context.Context) error {

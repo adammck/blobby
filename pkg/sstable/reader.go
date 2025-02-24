@@ -8,6 +8,7 @@ import (
 )
 
 type Reader struct {
+	// TODO: this should be ReadCloser. i think we're leaking connections.
 	r io.Reader
 }
 
