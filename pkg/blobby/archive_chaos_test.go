@@ -17,10 +17,10 @@ var (
 	initCount = flag.Int("initcount", 1000, "number of keys to create initially")
 	numOps    = flag.Int("numops", 3000, "number of operations to perform")
 
-	pGet     = flag.Int("pget", 70, "probability of get")
-	pPut     = flag.Int("pput", 20, "probability of put")
-	pFlush   = flag.Int("pflush", 8, "probability of flush")
-	pCompact = flag.Int("pcompact", 2, "probability of compaction")
+	pGet     = flag.Int("pget", 200, "probability of get")
+	pPut     = flag.Int("pput", 200, "probability of put")
+	pFlush   = flag.Int("pflush", 10, "probability of flush")
+	pCompact = flag.Int("pcompact", 1, "probability of compaction")
 
 	pHot  = flag.Int("phot", 50, "probability of hot key")
 	pWarm = flag.Int("pwarm", 30, "probability of warm key")
@@ -89,7 +89,7 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 
 	t.Logf("Spamming %d random ops....", cfg.numOps)
 	totalOps := cfg.pGet + cfg.pPut + cfg.pFlush + cfg.pCompact
-	for i := range cfg.numOps {
+	for range cfg.numOps {
 		var op operation
 		p := rand.Intn(totalOps)
 
@@ -109,7 +109,6 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 			op = compactOp{}
 		}
 
-		t.Logf("Op %d: %s", i+1, op)
 		err := op.run(t, ctx, b, state)
 		require.NoError(t, err)
 	}
