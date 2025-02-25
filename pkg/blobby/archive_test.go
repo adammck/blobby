@@ -48,6 +48,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// -------------------------------------- part one: inserts and flushes ----
 
 	t1 := c.Now()
+	mt1 := fmt.Sprintf("mt_%d", t1.UTC().UnixNano())
 
 	// prepare n docs full of junk and write them all to the memtable. note that
 	// there's no overwriting, because each one has a unique key.
@@ -68,7 +69,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats := tb.get("001")
 	require.Equal(t, val, docs["001"])
 	require.Equal(t, &GetStats{
-		Source:         "blue",
+		Source:         mt1,
 		BlobsFetched:   0,
 		RecordsScanned: 0,
 	}, gstats)
@@ -79,12 +80,13 @@ func TestBasicWriteRead(t *testing.T) {
 
 	// flush memtable to the blobstore
 	t2 := c.Now()
+	mt2 := fmt.Sprintf("mt_%d", t2.UTC().UnixNano())
 	fstats, err := b.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
-		FlushedMemtable: "blue",
-		ActiveMemtable:  "green",
-		BlobURL:         fmt.Sprintf("%d.sstable", t2.Unix()),
+		FlushedMemtable: mt1,
+		ActiveMemtable:  mt2,
+		BlobURL:         fmt.Sprintf("%d.sstable", t2.UnixMilli()),
 		Meta: &sstable.Meta{
 			MinKey:  "001",
 			MaxKey:  "010",
@@ -100,7 +102,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = tb.get("001")
 	require.Equal(t, val, docs["001"])
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("%d.sstable", t2.Unix()),
+		Source:         fmt.Sprintf("%d.sstable", t2.UnixMilli()),
 		BlobsFetched:   1,
 		RecordsScanned: 1,
 	}, gstats)
@@ -110,7 +112,7 @@ func TestBasicWriteRead(t *testing.T) {
 	require.Equal(t, val, docs["005"])
 	require.Equal(t, gstats.RecordsScanned, 5)
 
-	// write ten more new documents. they'll end up in the other memtable.
+	// write ten more new documents. they'll end up in the new memtable.
 	for i := 11; i <= 20; i++ {
 		// see explanation above.
 		c.Advance(15 * time.Millisecond)
@@ -120,11 +122,11 @@ func TestBasicWriteRead(t *testing.T) {
 		tb.put(k, docs[k])
 	}
 
-	// fetch one of the new keys. it's in the other memtable.
+	// fetch one of the new keys. it's in the second memtable.
 	val, gstats = tb.get("015")
 	require.Equal(t, val, docs["015"])
 	require.Equal(t, &GetStats{
-		Source: "green",
+		Source: mt2,
 	}, gstats)
 
 	// pass some time, so the second sstable will have a different URL. (they're
@@ -134,12 +136,13 @@ func TestBasicWriteRead(t *testing.T) {
 	// flush again. note that the keys in this sstable are totally disjoint from
 	// the first.
 	t3 := c.Now()
+	mt3 := fmt.Sprintf("mt_%d", t3.UTC().UnixNano())
 	fstats, err = b.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
-		FlushedMemtable: "green",
-		ActiveMemtable:  "blue",
-		BlobURL:         fmt.Sprintf("%d.sstable", t3.Unix()),
+		FlushedMemtable: mt2,
+		ActiveMemtable:  mt3,
+		BlobURL:         fmt.Sprintf("%d.sstable", t3.UnixMilli()),
 		Meta: &sstable.Meta{
 			MinKey:  "011",
 			MaxKey:  "020",
@@ -156,14 +159,14 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = tb.get("002")
 	require.Equal(t, val, docs["002"])
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("%d.sstable", t2.Unix()),
+		Source:         fmt.Sprintf("%d.sstable", t2.UnixMilli()),
 		BlobsFetched:   1,
 		RecordsScanned: 2,
 	}, gstats)
 	val, gstats = tb.get("014")
 	require.Equal(t, val, docs["014"])
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("%d.sstable", t3.Unix()),
+		Source:         fmt.Sprintf("%d.sstable", t3.UnixMilli()),
 		BlobsFetched:   1,
 		RecordsScanned: 4,
 	}, gstats)
@@ -185,23 +188,24 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = tb.get("003")
 	require.Equal(t, val, []byte("xxx"))
 	require.Equal(t, &GetStats{
-		Source: "blue",
+		Source: mt3,
 	}, gstats)
 	val, gstats = tb.get("013")
 	require.Equal(t, val, []byte("yyy"))
 	require.Equal(t, &GetStats{
-		Source: "blue",
+		Source: mt3,
 	}, gstats)
 
 	// flush again. the two keys we just wrote will end up in the new sstable.
 	c.Advance(1 * time.Hour)
 	t4 := c.Now()
+	mt4 := fmt.Sprintf("mt_%d", t4.UTC().UnixNano())
 	fstats, err = b.Flush(ctx)
 	require.NoError(t, err)
 	require.Equal(t, &FlushStats{
-		FlushedMemtable: "blue",
-		ActiveMemtable:  "green",
-		BlobURL:         fmt.Sprintf("%d.sstable", t4.Unix()),
+		FlushedMemtable: mt3,
+		ActiveMemtable:  mt4,
+		BlobURL:         fmt.Sprintf("%d.sstable", t4.UnixMilli()),
 		Meta: &sstable.Meta{
 			MinKey:  "003",
 			MaxKey:  "013",
@@ -225,7 +229,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = tb.get("003")
 	require.Equal(t, val, []byte("xxx"))
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("%d.sstable", t4.Unix()),
+		Source:         fmt.Sprintf("%d.sstable", t4.UnixMilli()),
 		BlobsFetched:   1, // <--
 		RecordsScanned: 1,
 	}, gstats)
@@ -235,7 +239,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = tb.get("002")
 	require.Equal(t, val, docs["002"])
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("%d.sstable", t2.Unix()),
+		Source:         fmt.Sprintf("%d.sstable", t2.UnixMilli()),
 		BlobsFetched:   1, // <--
 		RecordsScanned: 2,
 	}, gstats)
@@ -251,7 +255,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = tb.get("012")
 	require.Equal(t, val, docs["012"])
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("%d.sstable", t3.Unix()),
+		Source:         fmt.Sprintf("%d.sstable", t3.UnixMilli()),
 		BlobsFetched:   2, // <--
 		RecordsScanned: 4, // (003, 013), (011, 012)
 	}, gstats)
@@ -289,7 +293,7 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = tb.get("003")
 	require.Equal(t, []byte("xxx"), val)
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("%d.sstable", t5.Unix()),
+		Source:         fmt.Sprintf("%d.sstable", t5.UnixMilli()),
 		BlobsFetched:   1,
 		RecordsScanned: 3,
 	}, gstats)
@@ -298,14 +302,14 @@ func TestBasicWriteRead(t *testing.T) {
 	val, gstats = tb.get("013")
 	require.Equal(t, []byte("yyy"), val)
 	require.Equal(t, &GetStats{
-		Source:         fmt.Sprintf("%d.sstable", t5.Unix()),
+		Source:         fmt.Sprintf("%d.sstable", t5.UnixMilli()),
 		BlobsFetched:   1,
 		RecordsScanned: 14,
 	}, gstats)
 
 	// check that the old sstables were deleted.
 	for _, tt := range []time.Time{t2, t3, t4} {
-		_, _, err = b.bs.Find(ctx, fmt.Sprintf("%d.sstable", tt.Unix()), "001")
+		_, _, err = b.bs.Find(ctx, fmt.Sprintf("%d.sstable", tt.UnixMilli()), "001")
 		require.Error(t, err)
 	}
 
