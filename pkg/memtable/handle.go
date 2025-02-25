@@ -47,7 +47,6 @@ func (h *Handle) Flush(ctx context.Context, ch chan *types.Record) error {
 		ch <- &rec
 	}
 
-	// TODO: does this belong at the bottom?
 	close(ch)
 
 	err = cur.Err()
@@ -58,15 +57,7 @@ func (h *Handle) Flush(ctx context.Context, ch chan *types.Record) error {
 	return nil
 }
 
-func (h *Handle) Truncate(ctx context.Context) error {
-	err := h.coll.Drop(ctx)
-	if err != nil {
-		return fmt.Errorf("Drop: %w", err)
-	}
-
-	return h.Create(ctx)
-}
-
+// Create initializes the collection for this handle with appropriate indexes
 func (h *Handle) Create(ctx context.Context) error {
 	err := h.db.CreateCollection(ctx, h.coll.Name())
 	if err != nil {
@@ -89,4 +80,18 @@ func (h *Handle) Create(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// Count returns the number of documents in the collection
+func (h *Handle) Count(ctx context.Context) (int64, error) {
+	return h.coll.CountDocuments(ctx, bson.M{})
+}
+
+// IsEmpty returns true if the collection has no documents
+func (h *Handle) IsEmpty(ctx context.Context) (bool, error) {
+	count, err := h.Count(ctx)
+	if err != nil {
+		return false, err
+	}
+	return count == 0, nil
 }
