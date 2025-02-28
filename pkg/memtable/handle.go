@@ -37,9 +37,8 @@ func (h *Handle) Flush(ctx context.Context, ch chan *types.Record) error {
 
 	for cur.Next(ctx) {
 		var rec types.Record
-		var err error
 
-		err = cur.Decode(&rec)
+		err := cur.Decode(&rec)
 		if err != nil {
 			return fmt.Errorf("Decode: %w", err)
 		}
@@ -56,15 +55,6 @@ func (h *Handle) Flush(ctx context.Context, ch chan *types.Record) error {
 	}
 
 	return nil
-}
-
-func (h *Handle) Truncate(ctx context.Context) error {
-	err := h.coll.Drop(ctx)
-	if err != nil {
-		return fmt.Errorf("Drop: %w", err)
-	}
-
-	return h.Create(ctx)
 }
 
 func (h *Handle) Create(ctx context.Context) error {

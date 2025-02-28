@@ -16,9 +16,8 @@ import (
 const (
 	defaultDB               = "blobby"
 	metaCollectionName      = "meta"
+	memtablesCollectionName = "memtables"
 	metaActiveMemtableDocID = "active_memtable"
-	blueMemtableName        = "blue"
-	greenMemtableName       = "green"
 
 	// How long to sleep before retrying a failed insert. This must be more than
 	// a millisecond, because that's the resolution of BSON timestamps which we
@@ -26,6 +25,12 @@ const (
 	retrySleep  = 1 * time.Millisecond
 	retryJitter = 100 * time.Microsecond // 0.1ms
 )
+
+type memtableInfo struct {
+	ID      string    `bson:"_id"`
+	Created time.Time `bson:"created,omitempty"`
+	Status  string    `bson:"status,omitempty"`
+}
 
 type Memtable struct {
 	mongoURL string
@@ -46,55 +51,28 @@ func (mt *Memtable) Get(ctx context.Context, key string) (*types.Record, string,
 		return nil, "", fmt.Errorf("GetMongo: %w", err)
 	}
 
-	sess, err := db.Client().StartSession()
+	cur, err := db.Collection(memtablesCollectionName).Find(
+		ctx,
+		bson.M{},
+		options.Find().SetSort(bson.D{{Key: "created", Value: -1}}))
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("db.Collection: %w", err)
 	}
-	defer sess.EndSession(ctx)
+	defer cur.Close(ctx)
 
-	var active string
-	var recBlue, recGreen *types.Record
+	var memtables []memtableInfo
+	if err := cur.All(ctx, &memtables); err != nil {
+		return nil, "", fmt.Errorf("cur.All: %w", err)
+	}
 
-	err = mongo.WithSession(ctx, sess, func(sctx mongo.SessionContext) error {
-		err := sess.StartTransaction()
-		if err != nil {
-			return err
+	// try to find the key in each collection, starting with newest.
+	for _, memtable := range memtables {
+		rec, err := mt.innerGetOneCollection(ctx, db, memtable.ID, key)
+		if err != nil && err != mongo.ErrNoDocuments {
+			return nil, "", fmt.Errorf("innerGetOneCollection(%s): %w", memtable.ID, err)
 		}
-
-		active, recBlue, recGreen, err = mt.innerGet(sctx, db, key)
-		if err != nil {
-			return err
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, "", fmt.Errorf("mongo.WithSession: %w", err)
-	}
-
-	var prio [2]string
-	switch active {
-	case blueMemtableName:
-		prio = [2]string{blueMemtableName, greenMemtableName}
-	case greenMemtableName:
-		prio = [2]string{greenMemtableName, blueMemtableName}
-	default:
-		return nil, "", fmt.Errorf("invalid active collection: %s", active)
-	}
-
-	recs := map[string]*types.Record{
-		blueMemtableName:  recBlue,
-		greenMemtableName: recGreen,
-	}
-
-	// iterate the collections in priority order. the current one first, and the
-	// inactive one after that, to capture anything which was written before the
-	// last swap, but not yet flushed to s3.
-	for _, name := range prio {
-		r, ok := recs[name]
-		if ok && r != nil {
-			return r, name, err
+		if rec != nil {
+			return rec, memtable.ID, nil
 		}
 	}
 
@@ -102,26 +80,7 @@ func (mt *Memtable) Get(ctx context.Context, key string) (*types.Record, string,
 	return nil, "", &NotFound{key}
 }
 
-func (mt *Memtable) innerGet(ctx mongo.SessionContext, db *mongo.Database, key string) (string, *types.Record, *types.Record, error) {
-	active, err := mt.activeCollectionName(ctx, db)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("activeCollectionName: %w", err)
-	}
-
-	recBlue, errBlue := mt.innerGetOneCollection(ctx, db, blueMemtableName, key)
-	if errBlue != nil && errBlue != mongo.ErrNoDocuments {
-		return "", nil, nil, fmt.Errorf("innerGetOneCollection(blue): %w", err)
-	}
-
-	recGreen, err := mt.innerGetOneCollection(ctx, db, greenMemtableName, key)
-	if errBlue != nil && errBlue != mongo.ErrNoDocuments {
-		return "", nil, nil, fmt.Errorf("innerGetOneCollection(green): %w", err)
-	}
-
-	return active, recBlue, recGreen, nil
-}
-
-func (mt *Memtable) innerGetOneCollection(ctx mongo.SessionContext, db *mongo.Database, coll, key string) (*types.Record, error) {
+func (mt *Memtable) innerGetOneCollection(ctx context.Context, db *mongo.Database, coll, key string) (*types.Record, error) {
 	res := db.Collection(coll).FindOne(ctx, bson.M{"key": key}, options.FindOne().SetSort(bson.M{"ts": -1}))
 
 	b, err := res.Raw()
@@ -181,26 +140,26 @@ func (mt *Memtable) Init(ctx context.Context) error {
 
 	err = db.CreateCollection(ctx, metaCollectionName)
 	if err != nil {
-		return fmt.Errorf("CreateCollection: %w", err)
+		return fmt.Errorf("CreateCollection(%s): %w", metaCollectionName, err)
+	}
+
+	err = db.CreateCollection(ctx, memtablesCollectionName)
+	if err != nil {
+		return fmt.Errorf("CreateCollection(%s): %w", memtablesCollectionName, err)
+	}
+
+	handle, err := mt.createNext(ctx, db)
+	if err != nil {
+		return fmt.Errorf("createNewMemtable: %w", err)
 	}
 
 	coll := db.Collection(metaCollectionName)
 	_, err = coll.InsertOne(ctx, bson.M{
 		"_id":   metaActiveMemtableDocID,
-		"value": blueMemtableName,
+		"value": handle.Name(),
 	})
 	if err != nil {
 		return fmt.Errorf("InsertOne: %w", err)
-	}
-
-	blue := NewHandle(db, blueMemtableName)
-	if err := blue.Create(ctx); err != nil {
-		return err
-	}
-
-	green := NewHandle(db, greenMemtableName)
-	if err := green.Create(ctx); err != nil {
-		return err
 	}
 
 	return nil
@@ -241,7 +200,7 @@ func (mt *Memtable) activeCollection(ctx context.Context) (*mongo.Collection, er
 		return nil, err
 	}
 
-	cn, err := mt.activeCollectionName(ctx, m)
+	cn, err := activeCollectionName(ctx, m)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +208,7 @@ func (mt *Memtable) activeCollection(ctx context.Context) (*mongo.Collection, er
 	return m.Collection(cn), nil
 }
 
-func (mt *Memtable) activeCollectionName(ctx context.Context, db *mongo.Database) (string, error) {
+func activeCollectionName(ctx context.Context, db *mongo.Database) (string, error) {
 	res := db.Collection(metaCollectionName).FindOne(ctx, bson.M{"_id": metaActiveMemtableDocID})
 
 	var doc bson.M
@@ -271,48 +230,79 @@ func (mt *Memtable) activeCollectionName(ctx context.Context, db *mongo.Database
 	return s, nil
 }
 
-// Swap updates the active collection with the inactive collection, and returns
-// them both.
-func (mt *Memtable) Swap(ctx context.Context) (hPrev *Handle, hNext *Handle, err error) {
+func (mt *Memtable) createNext(ctx context.Context, db *mongo.Database) (*Handle, error) {
+	name := fmt.Sprintf("mt_%d", mt.clock.Now().UTC().UnixNano())
+
+	handle := NewHandle(db, name)
+	if err := handle.Create(ctx); err != nil {
+		return nil, fmt.Errorf("handle.Create: %w", err)
+	}
+
+	_, err := db.Collection(memtablesCollectionName).InsertOne(ctx, memtableInfo{
+		ID:      name,
+		Created: mt.clock.Now(),
+		Status:  "active",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error tracking memtable: %w", err)
+	}
+
+	return handle, nil
+}
+
+func (mt *Memtable) Rotate(ctx context.Context) (hPrev *Handle, hNext *Handle, err error) {
 	db, err := mt.GetMongo(ctx)
 	if err != nil {
-		return
+		return nil, nil, fmt.Errorf("GetMongo: %w", err)
 	}
 
-	nPrev, err := mt.activeCollectionName(ctx, db)
+	activeName, err := activeCollectionName(ctx, db)
 	if err != nil {
-		return
+		return nil, nil, fmt.Errorf("activeCollectionName: %w", err)
 	}
 
-	nNext := blueMemtableName
-	if nPrev == blueMemtableName {
-		nNext = greenMemtableName
-	}
-
-	// check that the new collection is empty. this is not safe, because it's
-	// not transactional. but we're going to change this soon, to use new
-	// collections rather than flipping between two, so it's fine.
-	n, err := db.Collection(nNext).CountDocuments(ctx, bson.D{})
+	hNext, err = mt.createNext(ctx, db)
 	if err != nil {
-		err = fmt.Errorf("CountDocuments(%s): %w", nNext, err)
-		return
-	}
-	if n > 0 {
-		err = fmt.Errorf("want to activate %s, but is not empty", nNext)
-		return
+		return nil, nil, fmt.Errorf("createNext: %w", err)
 	}
 
 	_, err = db.Collection(metaCollectionName).UpdateOne(
 		ctx,
 		bson.M{"_id": metaActiveMemtableDocID},
-		bson.M{"$set": bson.M{"value": nNext}},
+		bson.M{"$set": bson.M{"value": hNext.Name()}},
 	)
 	if err != nil {
-		err = fmt.Errorf("error updating active memtable: %w", err)
-		return
+		return nil, nil, fmt.Errorf("UpdateOne: %w", err)
 	}
 
-	hPrev = NewHandle(db, nPrev)
-	hNext = NewHandle(db, nNext)
-	return
+	_, err = db.Collection(memtablesCollectionName).UpdateOne(
+		ctx,
+		bson.M{"_id": activeName},
+		bson.M{"$set": bson.M{"status": "flushing"}},
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("UpdateOne: %w", err)
+	}
+
+	hPrev = NewHandle(db, activeName)
+	return hPrev, hNext, nil
+}
+
+func (mt *Memtable) Drop(ctx context.Context, name string) error {
+	db, err := mt.GetMongo(ctx)
+	if err != nil {
+		return fmt.Errorf("GetMongo: %w", err)
+	}
+
+	err = db.Collection(name).Drop(ctx)
+	if err != nil {
+		return fmt.Errorf("Drop: %w", err)
+	}
+
+	_, err = db.Collection(memtablesCollectionName).DeleteOne(ctx, bson.M{"_id": name})
+	if err != nil {
+		return fmt.Errorf("DeleteOne: %w", err)
+	}
+
+	return nil
 }

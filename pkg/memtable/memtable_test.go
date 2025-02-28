@@ -3,6 +3,7 @@ package memtable
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,46 +25,63 @@ func TestSwap(t *testing.T) {
 	err := mt.Init(ctx)
 	require.NoError(t, err)
 
-	// write to default table (blue)
+	// Get initial memtable name
+	mtn1, err := getCurrentMemtableName(ctx, t, mt)
+	require.NoError(t, err)
+
+	// Write to initial table
 	dest1, err := mt.Put(ctx, "k1", []byte("v1"))
 	require.NoError(t, err)
-	require.Equal(t, blueMemtableName, dest1)
+	require.Equal(t, mtn1, dest1)
 
-	// first swap: blue -> green
-	hNow, hPrev, err := mt.Swap(ctx)
+	// Advance the clock before swap to ensure unique timestamp
+	c.Advance(1 * time.Second)
+
+	// Swap to create a new memtable
+	hOld, hNew, err := mt.Rotate(ctx)
 	require.NoError(t, err)
-	require.Equal(t, greenMemtableName, hPrev.Name())
+	require.Equal(t, mtn1, hOld.Name())
+	require.NotEqual(t, mtn1, hNew.Name())
+	require.True(t, strings.HasPrefix(hNew.Name(), "mt_"))
 
-	// write to now-active table (green)
+	// Verify the new memtable is now active
+	mtn2, err := getCurrentMemtableName(ctx, t, mt)
+	require.NoError(t, err)
+	require.Equal(t, hNew.Name(), mtn2)
+
+	// Write to now-active table
 	dest2, err := mt.Put(ctx, "k2", []byte("v2"))
 	require.NoError(t, err)
-	require.Equal(t, greenMemtableName, dest2)
+	require.Equal(t, mtn2, dest2)
 
-	// verify both writes can be read back
+	// Verify both writes can be read back
 	rec1, src1, err := mt.Get(ctx, "k1")
 	require.NoError(t, err)
 	require.Equal(t, []byte("v1"), rec1.Document)
-	require.Equal(t, dest1, src1)
+	require.Equal(t, mtn1, src1)
+
 	rec2, src2, err := mt.Get(ctx, "k2")
 	require.NoError(t, err)
 	require.Equal(t, []byte("v2"), rec2.Document)
-	require.Equal(t, dest2, src2)
+	require.Equal(t, mtn2, src2)
 
-	// try to swap back: green -> blue
-	// fails because we haven't truncated blue
-	_, _, err = mt.Swap(ctx)
-	require.EqualError(t, err, fmt.Sprintf("want to activate %s, but is not empty", blueMemtableName))
+	// Advance clock again before dropping
+	c.Advance(1 * time.Second)
 
-	// so truncate it, to drop all the data
-	// (note that we didn't flush, we're not testing that here.)
-	err = hNow.Truncate(ctx)
+	// Drop the old memtable
+	err = mt.Drop(ctx, mtn1)
 	require.NoError(t, err)
 
-	// try to swap back again: green -> blue
-	// it works this time
-	_, hNow, err = mt.Swap(ctx)
+	// Verify k1 is no longer readable
+	_, _, err = mt.Get(ctx, "k1")
+	require.Error(t, err)
+	require.IsType(t, &NotFound{}, err)
+
+	// k2 should still be readable
+	rec2, src2, err = mt.Get(ctx, "k2")
 	require.NoError(t, err)
-	require.Equal(t, blueMemtableName, hNow.Name())
+	require.Equal(t, []byte("v2"), rec2.Document)
+	require.Equal(t, mtn2, src2)
 }
 
 func TestPut(t *testing.T) {
@@ -75,13 +93,17 @@ func TestPut(t *testing.T) {
 	err := mt.Init(ctx)
 	require.NoError(t, err)
 
-	// write to default table (blue)
+	// Get the current memtable name
+	currentName, err := getCurrentMemtableName(ctx, t, mt)
+	require.NoError(t, err)
+
+	// Write to current table
 	dest, err := mt.Put(ctx, "k", []byte("vvvv"))
 	require.NoError(t, err)
-	require.Equal(t, blueMemtableName, dest)
+	require.Equal(t, currentName, dest)
 
-	// check that it made it to mongo
-	recs := getRecords(ctx, t, mt, blueMemtableName, "k")
+	// Check that it made it to mongo
+	recs := getRecords(ctx, t, mt, currentName, "k")
 	require.Equal(t, []types.Record{
 		{
 			Key:       "k",
@@ -100,12 +122,16 @@ func TestPutConcurrent(t *testing.T) {
 	err := mt.Init(ctx)
 	require.NoError(t, err)
 
-	// normal uncontended put.
+	// Get the current memtable name
+	currentName, err := getCurrentMemtableName(ctx, t, mt)
+	require.NoError(t, err)
+
+	// Normal uncontended put
 	_, err = mt.Put(ctx, "k", []byte("1111"))
 	require.NoError(t, err)
 	t1 := c.Now()
 
-	// now attempt to write to the same key. this will fail, because the time
+	// Now attempt to write to the same key. this will fail, because the time
 	// (per the fake clock) is the same as the previous write. it will sleep
 	// then retry
 	var wg sync.WaitGroup
@@ -115,19 +141,19 @@ func TestPutConcurrent(t *testing.T) {
 		wg.Done()
 	}()
 
-	// block until Put is sleeping.
+	// Block until Put is sleeping
 	ctx2, cancel := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel()
 	require.NoError(t, c.BlockUntilContext(ctx2, 1), "mt.Put did not sleep")
 
-	// advance 1.2ms to exceed the maximum sleep time (with jitter).
+	// Advance 1.2ms to exceed the maximum sleep time (with jitter)
 	c.Advance(retrySleep + retryJitter + 1)
 	t2 := c.Now()
 	wg.Wait()
 	require.NoError(t, err)
 
-	// check that both writes made it to mongo.
-	recs := getRecords(ctx, t, mt, blueMemtableName, "k")
+	// Check that both writes made it to mongo
+	recs := getRecords(ctx, t, mt, currentName, "k")
 	require.Equal(t, []types.Record{
 		{
 			Key:       "k",
@@ -140,6 +166,31 @@ func TestPutConcurrent(t *testing.T) {
 			Document:  []byte("2222"),
 		},
 	}, recs)
+}
+
+// Helper function to get the current memtable name
+func getCurrentMemtableName(ctx context.Context, t *testing.T, mt *Memtable) (string, error) {
+	db, err := mt.GetMongo(ctx)
+	require.NoError(t, err)
+
+	res := db.Collection(metaCollectionName).FindOne(ctx, bson.M{"_id": metaActiveMemtableDocID})
+	var doc bson.M
+	err = res.Decode(&doc)
+	if err != nil {
+		return "", err
+	}
+
+	val, ok := doc["value"]
+	if !ok {
+		return "", fmt.Errorf("no value key in active memtable doc")
+	}
+
+	s, ok := val.(string)
+	if !ok {
+		return "", fmt.Errorf("value in active memtable doc was not string")
+	}
+
+	return s, nil
 }
 
 func getRecords(ctx context.Context, t *testing.T, mt *Memtable, coll string, key string) []types.Record {
