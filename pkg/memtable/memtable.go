@@ -26,6 +26,12 @@ const (
 	retryJitter = 100 * time.Microsecond // 0.1ms
 )
 
+type memtableInfo struct {
+	ID      string    `bson:"_id"`
+	Created time.Time `bson:"created,omitempty"`
+	Status  string    `bson:"status,omitempty"`
+}
+
 type Memtable struct {
 	mongoURL string
 	mongo    *mongo.Database
@@ -45,37 +51,32 @@ func (mt *Memtable) Get(ctx context.Context, key string) (*types.Record, string,
 		return nil, "", fmt.Errorf("GetMongo: %w", err)
 	}
 
-	// Get all memtables sorted by creation time (newest first)
-	cursor, err := db.Collection(memtablesCollectionName).Find(
+	cur, err := db.Collection(memtablesCollectionName).Find(
 		ctx,
 		bson.M{},
-		options.Find().SetSort(bson.D{{Key: "created", Value: -1}}),
-	)
+		options.Find().SetSort(bson.D{{Key: "created", Value: -1}}))
 	if err != nil {
-		return nil, "", fmt.Errorf("finding memtables: %w", err)
+		return nil, "", fmt.Errorf("db.Collection: %w", err)
 	}
-	defer cursor.Close(ctx)
+	defer cur.Close(ctx)
 
-	var memtables []struct {
-		ID string `bson:"_id"`
-	}
-	if err := cursor.All(ctx, &memtables); err != nil {
-		return nil, "", fmt.Errorf("reading memtables: %w", err)
+	var memtables []memtableInfo
+	if err := cur.All(ctx, &memtables); err != nil {
+		return nil, "", fmt.Errorf("cur.All: %w", err)
 	}
 
-	// Try to find the key in each memtable, starting with newest
+	// try to find the key in each collection, starting with newest.
 	for _, memtable := range memtables {
 		rec, err := mt.innerGetOneCollection(ctx, db, memtable.ID, key)
 		if err != nil && err != mongo.ErrNoDocuments {
 			return nil, "", fmt.Errorf("innerGetOneCollection(%s): %w", memtable.ID, err)
 		}
-
 		if rec != nil {
 			return rec, memtable.ID, nil
 		}
 	}
 
-	// Not found in any memtable
+	// not found in any collection.
 	return nil, "", &NotFound{key}
 }
 
@@ -112,7 +113,8 @@ func (mt *Memtable) Put(ctx context.Context, key string, value []byte) (string, 
 			break
 		}
 
-		// sleep and retry to get a new timestamp
+		// sleep and retry to get a new timestamp. it's almost certainly been
+		// long enough already, but this makes testing easier.
 		if mongo.IsDuplicateKeyError(err) {
 			jitter := time.Duration(rand.Int63n(retryJitter.Nanoseconds()))
 			mt.clock.Sleep(retrySleep + jitter)
@@ -136,25 +138,21 @@ func (mt *Memtable) Init(ctx context.Context) error {
 		return fmt.Errorf("GetMongo: %w", err)
 	}
 
-	// Create meta collection for active memtable tracking
 	err = db.CreateCollection(ctx, metaCollectionName)
 	if err != nil {
-		return fmt.Errorf("CreateCollection(meta): %w", err)
+		return fmt.Errorf("CreateCollection(%s): %w", metaCollectionName, err)
 	}
 
-	// Create memtables collection for tracking all memtables
 	err = db.CreateCollection(ctx, memtablesCollectionName)
 	if err != nil {
-		return fmt.Errorf("CreateCollection(memtables): %w", err)
+		return fmt.Errorf("CreateCollection(%s): %w", memtablesCollectionName, err)
 	}
 
-	// Create initial memtable
-	handle, err := mt.createNewMemtable(ctx, db)
+	handle, err := mt.createNext(ctx, db)
 	if err != nil {
 		return fmt.Errorf("createNewMemtable: %w", err)
 	}
 
-	// Set it as active
 	coll := db.Collection(metaCollectionName)
 	_, err = coll.InsertOne(ctx, bson.M{
 		"_id":   metaActiveMemtableDocID,
@@ -210,15 +208,6 @@ func (mt *Memtable) activeCollection(ctx context.Context) (*mongo.Collection, er
 	return m.Collection(cn), nil
 }
 
-func (mt *Memtable) ActiveCollectionName(ctx context.Context) (string, error) {
-	db, err := mt.GetMongo(ctx)
-	if err != nil {
-		return "", fmt.Errorf("GetMongo: %w", err)
-	}
-
-	return activeCollectionName(ctx, db)
-}
-
 func activeCollectionName(ctx context.Context, db *mongo.Database) (string, error) {
 	res := db.Collection(metaCollectionName).FindOne(ctx, bson.M{"_id": metaActiveMemtableDocID})
 
@@ -241,25 +230,19 @@ func activeCollectionName(ctx context.Context, db *mongo.Database) (string, erro
 	return s, nil
 }
 
-// Creates a new memtable with unique name and returns a handle to it
-func (mt *Memtable) createNewMemtable(ctx context.Context, db *mongo.Database) (*Handle, error) {
+func (mt *Memtable) createNext(ctx context.Context, db *mongo.Database) (*Handle, error) {
 	name := fmt.Sprintf("mt_%d", mt.clock.Now().UTC().UnixNano())
 
-	// Create the collection
 	handle := NewHandle(db, name)
 	if err := handle.Create(ctx); err != nil {
 		return nil, fmt.Errorf("handle.Create: %w", err)
 	}
 
-	// Add to memtables tracking collection
-	_, err := db.Collection(memtablesCollectionName).InsertOne(
-		ctx,
-		bson.M{
-			"_id":     name,
-			"created": mt.clock.Now(),
-			"status":  "active",
-		},
-	)
+	_, err := db.Collection(memtablesCollectionName).InsertOne(ctx, memtableInfo{
+		ID:      name,
+		Created: mt.clock.Now(),
+		Status:  "active",
+	})
 	if err != nil {
 		return nil, fmt.Errorf("error tracking memtable: %w", err)
 	}
@@ -267,68 +250,58 @@ func (mt *Memtable) createNewMemtable(ctx context.Context, db *mongo.Database) (
 	return handle, nil
 }
 
-// Swap creates a new memtable, marks it as active, and returns both the previously
-// active memtable and the new active memtable
-func (mt *Memtable) Swap(ctx context.Context) (hPrev *Handle, hNext *Handle, err error) {
+func (mt *Memtable) Rotate(ctx context.Context) (hPrev *Handle, hNext *Handle, err error) {
 	db, err := mt.GetMongo(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("GetMongo: %w", err)
 	}
 
-	// Get current active memtable name
 	activeName, err := activeCollectionName(ctx, db)
 	if err != nil {
 		return nil, nil, fmt.Errorf("activeCollectionName: %w", err)
 	}
 
-	// Create a new memtable
-	hNext, err = mt.createNewMemtable(ctx, db)
+	hNext, err = mt.createNext(ctx, db)
 	if err != nil {
-		return nil, nil, fmt.Errorf("createNewMemtable: %w", err)
+		return nil, nil, fmt.Errorf("createNext: %w", err)
 	}
 
-	// Update the active memtable reference
 	_, err = db.Collection(metaCollectionName).UpdateOne(
 		ctx,
 		bson.M{"_id": metaActiveMemtableDocID},
 		bson.M{"$set": bson.M{"value": hNext.Name()}},
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error updating active memtable: %w", err)
+		return nil, nil, fmt.Errorf("UpdateOne: %w", err)
 	}
 
-	// Mark the previous memtable as "flushing"
 	_, err = db.Collection(memtablesCollectionName).UpdateOne(
 		ctx,
 		bson.M{"_id": activeName},
 		bson.M{"$set": bson.M{"status": "flushing"}},
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error updating memtable status: %w", err)
+		return nil, nil, fmt.Errorf("UpdateOne: %w", err)
 	}
 
-	// Return both handles
 	hPrev = NewHandle(db, activeName)
 	return hPrev, hNext, nil
 }
 
-// DropMemtable completely removes a memtable after it has been flushed
-func (mt *Memtable) DropMemtable(ctx context.Context, name string) error {
+func (mt *Memtable) Drop(ctx context.Context, name string) error {
 	db, err := mt.GetMongo(ctx)
 	if err != nil {
 		return fmt.Errorf("GetMongo: %w", err)
 	}
 
-	// Drop the collection
 	err = db.Collection(name).Drop(ctx)
 	if err != nil {
 		return fmt.Errorf("Drop: %w", err)
 	}
 
-	// Remove from tracking collection
 	_, err = db.Collection(memtablesCollectionName).DeleteOne(ctx, bson.M{"_id": name})
 	if err != nil {
-		return fmt.Errorf("error removing memtable tracking: %w", err)
+		return fmt.Errorf("DeleteOne: %w", err)
 	}
 
 	return nil

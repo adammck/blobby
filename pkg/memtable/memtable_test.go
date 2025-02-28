@@ -38,7 +38,7 @@ func TestSwap(t *testing.T) {
 	c.Advance(1 * time.Second)
 
 	// Swap to create a new memtable
-	hOld, hNew, err := mt.Swap(ctx)
+	hOld, hNew, err := mt.Rotate(ctx)
 	require.NoError(t, err)
 	require.Equal(t, mtn1, hOld.Name())
 	require.NotEqual(t, mtn1, hNew.Name())
@@ -69,7 +69,7 @@ func TestSwap(t *testing.T) {
 	c.Advance(1 * time.Second)
 
 	// Drop the old memtable
-	err = mt.DropMemtable(ctx, mtn1)
+	err = mt.Drop(ctx, mtn1)
 	require.NoError(t, err)
 
 	// Verify k1 is no longer readable

@@ -140,7 +140,7 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 	stats := &FlushStats{}
 
 	// TODO: check whether old sstable is still flushing
-	hPrev, hNext, err := b.mt.Swap(ctx)
+	hPrev, hNext, err := b.mt.Rotate(ctx)
 	if err != nil {
 		return stats, fmt.Errorf("memtable.Swap: %s", err)
 	}
@@ -187,10 +187,9 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 	stats.BlobURL = dest
 	stats.Meta = meta
 
-	err = b.mt.DropMemtable(ctx, hPrev.Name())
+	err = b.mt.Drop(ctx, hPrev.Name())
 	if err != nil {
-		// TODO: this is pretty bad. the sstable is readable, but we won't be able to swap back. what to do?
-		return stats, fmt.Errorf("memtable.DropMemtable: %w", err)
+		return stats, fmt.Errorf("memtable.Drop: %w", err)
 	}
 
 	return stats, nil
