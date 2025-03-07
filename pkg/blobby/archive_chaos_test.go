@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
+	"os"
 	"testing"
 
 	"github.com/adammck/blobby/pkg/blobstore"
@@ -70,6 +71,10 @@ func configFromFlags() chaosTestConfig {
 }
 
 func TestChaos(t *testing.T) {
+if os.Getenv("BLOBBY_RUN_CHAOS") == "" {
+		t.Skip("skipping chaos test; set BLOBBY_RUN_CHAOS=1 to run")
+	}
+
 	ctx, _, b := setup(t, clockwork.NewRealClock())
 	runChaosTest(t, ctx, b, configFromFlags())
 }

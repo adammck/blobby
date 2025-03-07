@@ -4,6 +4,14 @@ This is my key-val store on a blob store. There are many like it, but this one
 is mine. Don't expect much, I'm just having a bit of fun. Use something like
 [SlateDB][] if you need this for real.
 
+## Getting Started
+
+```console
+$ git clone https://github.com/adammck/blobby.git
+$ bin/test.sh
+$ bin/chaostest.sh
+```
+
 ## Usage
 
 Set connection vars:
