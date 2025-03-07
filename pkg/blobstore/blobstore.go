@@ -42,6 +42,7 @@ func (bs *Blobstore) Find(ctx context.Context, fn string, key string) (*types.Re
 	if err != nil {
 		return nil, nil, fmt.Errorf("getSST: %w", err)
 	}
+	defer reader.Close()
 
 	var rec *types.Record
 	stats := &GetStats{
@@ -69,6 +70,8 @@ func (bs *Blobstore) Find(ctx context.Context, fn string, key string) (*types.Re
 	return rec, stats, nil
 }
 
+// Get reads a single SSTable from the blobstore.
+// The caller must call Close on the reader when finished.
 func (bs *Blobstore) Get(ctx context.Context, key string) (*sstable.Reader, error) {
 	s3client, err := bs.getS3(ctx)
 	if err != nil {
@@ -85,7 +88,6 @@ func (bs *Blobstore) Get(ctx context.Context, key string) (*sstable.Reader, erro
 
 	reader, err := sstable.NewReader(output.Body)
 	if err != nil {
-		output.Body.Close()
 		return nil, fmt.Errorf("NewReader: %w", err)
 	}
 

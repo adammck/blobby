@@ -3,6 +3,7 @@ package sstable
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -112,7 +113,7 @@ func TestWriteOrder(t *testing.T) {
 	_, err := w.Write(&buf)
 	require.NoError(t, err)
 
-	r, err := NewReader(&buf)
+	r, err := NewReader(io.NopCloser(&buf))
 	require.NoError(t, err)
 
 	rec1, err := r.Next()

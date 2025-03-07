@@ -2,6 +2,7 @@ package sstable
 
 import (
 	"bytes"
+	"io"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 func TestNewReader(t *testing.T) {
 	var buf bytes.Buffer
 	buf.Write([]byte(magicBytes))
-	r, err := NewReader(&buf)
+	r, err := NewReader(io.NopCloser(&buf))
 	require.NoError(t, err)
 	assert.NotNil(t, r)
 }
@@ -21,7 +22,7 @@ func TestNewReader(t *testing.T) {
 func TestNewReaderInvalidMagicBytes(t *testing.T) {
 	var buf bytes.Buffer
 	buf.Write([]byte("invalid"))
-	_, err := NewReader(&buf)
+	_, err := NewReader(io.NopCloser(&buf))
 	assert.Error(t, err)
 }
 
@@ -33,7 +34,7 @@ func TestReaderNext(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotZero(t, data)
 
-	r, err := NewReader(&buf)
+	r, err := NewReader(io.NopCloser(&buf))
 	require.NoError(t, err)
 
 	rec, err := r.Next()
@@ -46,7 +47,7 @@ func TestReaderNextEOF(t *testing.T) {
 	var buf bytes.Buffer
 	buf.Write([]byte(magicBytes))
 
-	r, err := NewReader(&buf)
+	r, err := NewReader(io.NopCloser(&buf))
 	require.NoError(t, err)
 
 	rec, err := r.Next()

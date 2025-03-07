@@ -133,6 +133,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 			stats.Error = fmt.Errorf("getSST(%s): %w", m.Filename(), err)
 			return stats
 		}
+		defer r.Close()
 		readers[i] = r
 	}
 

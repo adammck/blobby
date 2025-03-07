@@ -8,24 +8,29 @@ import (
 )
 
 type Reader struct {
-	// TODO: this should be ReadCloser. i think we're leaking connections.
-	r io.Reader
+	rc io.ReadCloser
 }
 
-func NewReader(r io.Reader) (*Reader, error) {
+func NewReader(rc io.ReadCloser) (*Reader, error) {
 	magic := make([]byte, len(magicBytes))
-	if _, err := io.ReadFull(r, magic); err != nil {
+	if _, err := io.ReadFull(rc, magic); err != nil {
+		rc.Close()
 		return nil, fmt.Errorf("read magic bytes: %w", err)
 	}
 	if string(magic) != magicBytes {
+		rc.Close()
 		return nil, fmt.Errorf("wrong magic bytes: got=%x, want=%x", magic, magicBytes)
 	}
 
 	return &Reader{
-		r: r,
+		rc: rc,
 	}, nil
 }
 
 func (r *Reader) Next() (*types.Record, error) {
-	return types.Read(r.r)
+	return types.Read(r.rc)
+}
+
+func (r *Reader) Close() error {
+	return r.rc.Close()
 }

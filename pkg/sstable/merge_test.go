@@ -133,7 +133,7 @@ func readerWithRecords(t *testing.T, records []*types.Record) *Reader {
 		require.NoError(t, err)
 	}
 
-	r, err := NewReader(&buf)
+	r, err := NewReader(io.NopCloser(&buf))
 	require.NoError(t, err)
 	return r
 }
