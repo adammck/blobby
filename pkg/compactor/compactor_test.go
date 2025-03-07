@@ -91,9 +91,9 @@ func TestGetCompactionsSmallestFirst(t *testing.T) {
 
 	compactions := c.GetCompactions(metas, opts)
 	require.Len(t, compactions, 1)
-	require.Equal(t, 100, compactions[0].Inputs[0].Size)
-	require.Equal(t, 200, compactions[0].Inputs[1].Size)
-	require.Equal(t, 300, compactions[0].Inputs[2].Size)
+	require.Equal(t, int64(100), compactions[0].Inputs[0].Size)
+	require.Equal(t, int64(200), compactions[0].Inputs[1].Size)
+	require.Equal(t, int64(300), compactions[0].Inputs[2].Size)
 }
 
 func TestGetCompactionsLargestFirst(t *testing.T) {
@@ -113,9 +113,9 @@ func TestGetCompactionsLargestFirst(t *testing.T) {
 
 	compactions := c.GetCompactions(metas, opts)
 	require.Len(t, compactions, 1)
-	require.Equal(t, 300, compactions[0].Inputs[0].Size)
-	require.Equal(t, 200, compactions[0].Inputs[1].Size)
-	require.Equal(t, 100, compactions[0].Inputs[2].Size)
+	require.Equal(t, int64(300), compactions[0].Inputs[0].Size)
+	require.Equal(t, int64(200), compactions[0].Inputs[1].Size)
+	require.Equal(t, int64(100), compactions[0].Inputs[2].Size)
 }
 
 func TestGetCompactionsMaxFiles(t *testing.T) {

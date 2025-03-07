@@ -71,7 +71,7 @@ func configFromFlags() chaosTestConfig {
 }
 
 func TestChaos(t *testing.T) {
-if os.Getenv("BLOBBY_RUN_CHAOS") == "" {
+	if os.Getenv("BLOBBY_RUN_CHAOS") == "" {
 		t.Skip("skipping chaos test; set BLOBBY_RUN_CHAOS=1 to run")
 	}
 
@@ -216,7 +216,7 @@ func (o flushOp) run(t *testing.T, ctx context.Context, b *Blobby, state *testSt
 	stats, err := b.Flush(ctx)
 	if err != nil {
 		// special case. it's fine if there's nothing to flush.
-		if errors.Is(err, blobstore.NoRecords) {
+		if errors.Is(err, blobstore.ErrNoRecords) {
 			t.Logf("Flush: no records.")
 			return nil
 		}
@@ -224,7 +224,7 @@ func (o flushOp) run(t *testing.T, ctx context.Context, b *Blobby, state *testSt
 		return fmt.Errorf("flush: %v", err)
 	}
 	t.Logf("Flush: %d records -> %s, now active: %s",
-		stats.Meta.Count, stats.BlobURL, stats.ActiveMemtable)
+		stats.Meta.Count, stats.BlobName, stats.ActiveMemtable)
 	return nil
 }
 

@@ -54,7 +54,7 @@ func (w *Writer) Write(out io.Writer) (*Meta, error) {
 
 	m := &Meta{
 		Created: w.clock.Now(),
-		Size:    len(magicBytes),
+		Size:    int64(len(magicBytes)),
 	}
 
 	for _, record := range w.records {
@@ -64,7 +64,7 @@ func (w *Writer) Write(out io.Writer) (*Meta, error) {
 		}
 
 		m.Count++
-		m.Size += n
+		m.Size += int64(n)
 
 		if m.MinKey == "" || record.Key < m.MinKey {
 			m.MinKey = record.Key

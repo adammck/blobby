@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	defaultDB         = "blobby"
-	collectionName    = "sstables"
-	connectionTimeout = 3 * time.Second
+	defaultDB          = "blobby"
+	sstablesCollection = "sstables"
+	connectionTimeout  = 3 * time.Second
+	pingTimeout        = 3 * time.Second
 )
 
 type Store struct {
@@ -40,7 +41,9 @@ func (s *Store) getMongo(ctx context.Context) (*mongo.Database, error) {
 		return nil, err
 	}
 
-	if err := client.Ping(ctx, nil); err != nil {
+	ctxPing, cancel := context.WithTimeout(ctx, pingTimeout)
+	defer cancel()
+	if err := client.Ping(ctxPing, nil); err != nil {
 		return nil, err
 	}
 
@@ -54,12 +57,12 @@ func (s *Store) Init(ctx context.Context) error {
 		return fmt.Errorf("getMongo: %w", err)
 	}
 
-	err = db.CreateCollection(ctx, collectionName)
+	err = db.CreateCollection(ctx, sstablesCollection)
 	if err != nil {
 		return fmt.Errorf("CreateCollection: %w", err)
 	}
 
-	_, err = db.Collection(collectionName).Indexes().CreateOne(ctx, mongo.IndexModel{
+	_, err = db.Collection(sstablesCollection).Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{
 			{Key: "min_key", Value: 1},
 			{Key: "max_key", Value: 1},
@@ -78,7 +81,7 @@ func (s *Store) Insert(ctx context.Context, meta *sstable.Meta) error {
 		return fmt.Errorf("getMongo: %w", err)
 	}
 
-	_, err = db.Collection(collectionName).InsertOne(ctx, meta)
+	_, err = db.Collection(sstablesCollection).InsertOne(ctx, meta)
 	if err != nil {
 		return fmt.Errorf("InsertOne: %w", err)
 	}
@@ -93,7 +96,7 @@ func (s *Store) Delete(ctx context.Context, meta *sstable.Meta) error {
 	}
 
 	// TODO: add an ID to Meta and use that instead of this weird filter.
-	result, err := db.Collection(collectionName).DeleteOne(ctx, bson.M{
+	result, err := db.Collection(sstablesCollection).DeleteOne(ctx, bson.M{
 		"created": meta.Created,
 		"min_key": meta.MinKey,
 		"max_key": meta.MaxKey,
@@ -115,7 +118,7 @@ func (s *Store) GetContaining(ctx context.Context, key string) ([]*sstable.Meta,
 		return nil, fmt.Errorf("getMongo: %w", err)
 	}
 
-	cursor, err := db.Collection(collectionName).Find(ctx, bson.M{
+	cursor, err := db.Collection(sstablesCollection).Find(ctx, bson.M{
 		"min_key": bson.M{"$lte": key},
 		"max_key": bson.M{"$gte": key},
 	}, options.Find().SetSort(bson.D{
@@ -141,7 +144,7 @@ func (s *Store) GetAllMetas(ctx context.Context) ([]*sstable.Meta, error) {
 		return nil, fmt.Errorf("getMongo: %w", err)
 	}
 
-	cur, err := db.Collection(collectionName).Find(ctx, bson.M{}, options.Find().SetSort(bson.D{
+	cur, err := db.Collection(sstablesCollection).Find(ctx, bson.M{}, options.Find().SetSort(bson.D{
 		{Key: "min_key", Value: 1},
 		{Key: "max_time", Value: -1},
 	}))

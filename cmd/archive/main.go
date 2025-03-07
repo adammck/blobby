@@ -103,10 +103,10 @@ func cmdCompact(ctx context.Context, b *blobby.Blobby, bucket string) {
 	}
 
 	if cf.minSize > 0 {
-		opts.MinInputSize = int(cf.minSize)
+		opts.MinInputSize = cf.minSize
 	}
 	if cf.maxSize > 0 {
-		opts.MaxInputSize = int(cf.maxSize)
+		opts.MaxInputSize = cf.maxSize
 	}
 
 	if cf.minTime != "" {
@@ -218,6 +218,6 @@ func cmdFlush(ctx context.Context, b *blobby.Blobby) {
 		log.Fatalf("Flush: %s", err)
 	}
 
-	fmt.Printf("Flushed %d documents to: %s\n", stats.Meta.Count, stats.BlobURL)
+	fmt.Printf("Flushed %d documents to: %s\n", stats.Meta.Count, stats.BlobName)
 	fmt.Printf("Active memtable is now: %s\n", stats.ActiveMemtable)
 }

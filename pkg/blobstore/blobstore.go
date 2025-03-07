@@ -14,6 +14,8 @@ import (
 	"github.com/jonboulle/clockwork"
 )
 
+var ErrNoRecords = errors.New("NoRecords")
+
 type Blobstore struct {
 	bucket string
 	s3     *s3.Client
@@ -116,8 +118,6 @@ func (bs *Blobstore) Init(ctx context.Context) error {
 	return nil
 }
 
-var NoRecords = errors.New("NoRecords")
-
 // TODO: remove most of the return values; meta contains everything.
 func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (dest string, count int, meta *sstable.Meta, err error) {
 	f, err := os.CreateTemp("", "sstable-*")
@@ -140,7 +140,7 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (dest str
 
 	// nothing to write
 	if n == 0 {
-		return "", 0, nil, NoRecords
+		return "", 0, nil, ErrNoRecords
 	}
 
 	meta, err = w.Write(f)

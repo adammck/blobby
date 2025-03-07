@@ -173,7 +173,7 @@ func getCurrentMemtableName(ctx context.Context, t *testing.T, mt *Memtable) (st
 	db, err := mt.GetMongo(ctx)
 	require.NoError(t, err)
 
-	res := db.Collection(metaCollectionName).FindOne(ctx, bson.M{"_id": metaActiveMemtableDocID})
+	res := db.Collection(metaCollection).FindOne(ctx, bson.M{"_id": activeMemtableKey})
 	var doc bson.M
 	err = res.Decode(&doc)
 	if err != nil {

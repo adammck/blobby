@@ -31,7 +31,7 @@ func TestFlushEmpty(t *testing.T) {
 	close(ch)
 
 	_, _, _, err := bs.Flush(ctx, ch)
-	assert.ErrorIs(t, err, NoRecords)
+	assert.ErrorIs(t, err, ErrNoRecords)
 }
 
 func TestFlush(t *testing.T) {

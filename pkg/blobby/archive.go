@@ -53,12 +53,12 @@ func (b *Blobby) Ping(ctx context.Context) error {
 func (b *Blobby) Init(ctx context.Context) error {
 	err := b.mt.Init(ctx)
 	if err != nil {
-		return fmt.Errorf("memtable.Init: %s", err)
+		return fmt.Errorf("memtable.Init: %w", err)
 	}
 
 	err = b.md.Init(ctx)
 	if err != nil {
-		return fmt.Errorf("metadata.Init: %s", err)
+		return fmt.Errorf("metadata.Init: %w", err)
 	}
 
 	return nil
@@ -124,13 +124,11 @@ type FlushStats struct {
 	// The URL of the memtable which was flushed.
 	FlushedMemtable string
 
-	// The URL of the memtable that is now active, after the flush.
-	// TODO: Rename this to reflect that it's just the name now.
+	// The name of the memtable that is now active, after the flush.
 	ActiveMemtable string
 
-	// The URL of the flushed sstable.
-	// TODO: Rename this to reflect that it's just the blob key (filename) now.
-	BlobURL string
+	// The key of the flushed sstable in the blobstore.
+	BlobName string
 
 	// Metadata about the flushed sstable.
 	Meta *sstable.Meta
@@ -142,7 +140,7 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 	// TODO: check whether old sstable is still flushing
 	hPrev, hNext, err := b.mt.Rotate(ctx)
 	if err != nil {
-		return stats, fmt.Errorf("memtable.Swap: %s", err)
+		return stats, fmt.Errorf("memtable.Swap: %w", err)
 	}
 
 	stats.ActiveMemtable = hNext.Name()
@@ -184,7 +182,7 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 	}
 
 	stats.FlushedMemtable = hPrev.Name()
-	stats.BlobURL = dest
+	stats.BlobName = dest
 	stats.Meta = meta
 
 	err = b.mt.Drop(ctx, hPrev.Name())

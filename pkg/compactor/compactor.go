@@ -72,12 +72,12 @@ type CompactionOptions struct {
 	// MinInputSize specifies the minimum total number of bytes which we will
 	// compact. This is to avoid scheduling tiny compactions which are a waste
 	// of time.
-	MinInputSize int
+	MinInputSize int64
 
 	// MaxInputSize specifies the maximum total number of bytes which we will
 	// compact. This is to avoid scheduling huge compactions which take forever
 	// or never complete.
-	MaxInputSize int
+	MaxInputSize int64
 
 	// MinFiles specifies the minimum number of files which we will compact at
 	// once. I'm not sure why this is here. Prefer MinInputSize.
@@ -227,7 +227,7 @@ type Compaction struct {
 
 func (c *Compactor) GetCompactions(metas []*sstable.Meta, opts CompactionOptions) []*Compaction {
 	r := &Compaction{}
-	var tot int
+	var tot int64
 
 	// return early if there aren't enough files to possibly qualify.
 	if len(metas) < opts.MinFiles {

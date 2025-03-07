@@ -11,7 +11,7 @@ type Meta struct {
 	MinTime time.Time `bson:"min_time"`
 	MaxTime time.Time `bson:"max_time"`
 	Count   int       `bson:"count"`
-	Size    int       `bson:"size"`
+	Size    int64     `bson:"size"`
 
 	// Warning! Even though this is a time.Time, which has nanosecond precision
 	// and a zone, when serialized to BSON, it's truncated into a UTC datetime

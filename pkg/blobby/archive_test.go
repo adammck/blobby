@@ -85,14 +85,14 @@ func TestBasicWriteRead(t *testing.T) {
 	require.Equal(t, &FlushStats{
 		FlushedMemtable: t1.memtable,
 		ActiveMemtable:  t2.memtable,
-		BlobURL:         t2.sstable,
+		BlobName:        t2.sstable,
 		Meta: &sstable.Meta{
 			MinKey:  "001",
 			MaxKey:  "010",
 			MinTime: t1.t.Add(15 * time.Millisecond),
 			MaxTime: t1.t.Add(15 * time.Millisecond * 10),
 			Count:   10,
-			Size:    497, // idk lol
+			Size:    496, // unverified (didn't check, just pasted it)
 			Created: t2.t,
 		},
 	}, fstats)
@@ -140,14 +140,14 @@ func TestBasicWriteRead(t *testing.T) {
 	require.Equal(t, &FlushStats{
 		FlushedMemtable: t2.memtable,
 		ActiveMemtable:  t3.memtable,
-		BlobURL:         t3.sstable,
+		BlobName:        t3.sstable,
 		Meta: &sstable.Meta{
 			MinKey:  "011",
 			MaxKey:  "020",
 			MinTime: t2.t.Add(15 * time.Millisecond),
 			MaxTime: t2.t.Add(15 * time.Millisecond * 10),
 			Count:   10,
-			Size:    497,
+			Size:    496, // unverified
 			Created: t3.t,
 		},
 	}, fstats)
@@ -202,14 +202,14 @@ func TestBasicWriteRead(t *testing.T) {
 	require.Equal(t, &FlushStats{
 		FlushedMemtable: t3.memtable,
 		ActiveMemtable:  t4.memtable,
-		BlobURL:         t4.sstable,
+		BlobName:        t4.sstable,
 		Meta: &sstable.Meta{
 			MinKey:  "003",
 			MaxKey:  "013",
 			MinTime: t3.t.Add(15 * time.Millisecond),
 			MaxTime: t3.t.Add(15 * time.Millisecond * 2),
 			Count:   2,
-			Size:    93,
+			Size:    92,
 			Created: t4.t,
 		},
 	}, fstats)
@@ -273,7 +273,7 @@ func TestBasicWriteRead(t *testing.T) {
 			MinTime: t1.t.Add(15 * time.Millisecond),
 			MaxTime: t3.t.Add(15 * time.Millisecond * 2),
 			Count:   22,
-			Size:    1073,
+			Size:    1072,
 			Created: t5.t,
 		},
 	}, cstats[0].Outputs)
@@ -381,7 +381,7 @@ func TestBasicWriteRead(t *testing.T) {
 		MinTime: t6.t.Add(15 * time.Millisecond * 1),
 		MaxTime: t7.t.Add(15 * time.Millisecond * 2),
 		Count:   4,
-		Size:    175,
+		Size:    174,
 		Created: t9.t,
 	}, cstats[0].Outputs[0])
 

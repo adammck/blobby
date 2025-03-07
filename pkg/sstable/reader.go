@@ -18,7 +18,7 @@ func NewReader(r io.Reader) (*Reader, error) {
 		return nil, fmt.Errorf("read magic bytes: %w", err)
 	}
 	if string(magic) != magicBytes {
-		return nil, fmt.Errorf("wrong magic bytes")
+		return nil, fmt.Errorf("wrong magic bytes: got=%x, want=%x", magic, magicBytes)
 	}
 
 	return &Reader{

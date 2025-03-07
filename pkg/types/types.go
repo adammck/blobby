@@ -2,7 +2,7 @@ package types
 
 import (
 	"encoding/binary"
-	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -54,7 +54,7 @@ func readOne(r io.Reader) ([]byte, error) {
 
 	size := int(binary.LittleEndian.Uint32(sizeBytes[:]))
 	if size < 5 {
-		return nil, errors.New("invalid BSON document length")
+		return nil, fmt.Errorf("invalid BSON document length: want=5, got=%d", size)
 	}
 
 	docBytes := make([]byte, size)

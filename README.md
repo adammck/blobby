@@ -8,6 +8,7 @@ is mine. Don't expect much, I'm just having a bit of fun. Use something like
 
 ```console
 $ git clone https://github.com/adammck/blobby.git
+$ cd blobby
 $ bin/test.sh
 $ bin/chaostest.sh
 ```
