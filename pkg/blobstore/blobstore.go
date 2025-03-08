@@ -145,7 +145,7 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (dest str
 		return "", 0, nil, ErrNoRecords
 	}
 
-	meta, err = w.Write(f)
+	meta, _, err = w.Write(f)
 	if err != nil {
 		return "", 0, nil, fmt.Errorf("sstable.Write: %w", err)
 	}

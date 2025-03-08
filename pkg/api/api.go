@@ -5,6 +5,8 @@ package api
 
 import "context"
 
+type Index []IndexEntry
+
 type IndexEntry struct {
 	Key    string
 	Offset int64

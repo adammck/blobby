@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
 )
@@ -15,12 +16,35 @@ type Writer struct {
 	records []*types.Record
 	mu      sync.Mutex
 	clock   clockwork.Clock
+
+	indexRecordFreq int
+	indexByteFreq   int
 }
 
-func NewWriter(clock clockwork.Clock) *Writer {
-	return &Writer{
+type WriterOption func(*Writer)
+
+func WithIndexEveryNRecords(n int) WriterOption {
+	return func(w *Writer) {
+		w.indexRecordFreq = n
+	}
+}
+
+func WithIndexEveryNBytes(n int) WriterOption {
+	return func(w *Writer) {
+		w.indexByteFreq = n
+	}
+}
+
+func NewWriter(clock clockwork.Clock, options ...WriterOption) *Writer {
+	w := &Writer{
 		clock: clock,
 	}
+
+	for _, opt := range options {
+		opt(w)
+	}
+
+	return w
 }
 
 func (w *Writer) Add(record *types.Record) error {
@@ -30,7 +54,8 @@ func (w *Writer) Add(record *types.Record) error {
 	return nil
 }
 
-func (w *Writer) Write(out io.Writer) (*Meta, error) {
+// Enhanced Write method that builds and stores indices
+func (w *Writer) Write(out io.Writer) (*Meta, api.Index, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -47,22 +72,41 @@ func (w *Writer) Write(out io.Writer) (*Meta, error) {
 		return b.Timestamp.Compare(a.Timestamp)
 	})
 
-	_, err := out.Write([]byte(magicBytes))
+	n, err := out.Write([]byte(magicBytes))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	m := &Meta{
 		Created: w.clock.Now(),
-		Size:    int64(len(magicBytes)),
+		Size:    int64(n),
 	}
 
+	offset := int64(n)
+	idxRecs := 0
+	idxBytes := 0
+
+	var idx api.Index
 	for _, record := range w.records {
-		n, err := record.Write(out)
-		if err != nil {
-			return nil, fmt.Errorf("record.Write: %w", err)
+		if w.shouldCreateIndex(idxRecs, idxBytes) {
+			idx = append(idx, api.IndexEntry{
+				Key:    record.Key,
+				Offset: offset,
+			})
+			idxRecs = 0
+			idxBytes = 0
 		}
 
+		n, err := record.Write(out)
+		if err != nil {
+			return nil, nil, fmt.Errorf("record.Write: %w", err)
+		}
+
+		offset += int64(n)
+		idxBytes += n
+		idxRecs++
+
+		// Update metadata
 		m.Count++
 		m.Size += int64(n)
 
@@ -83,5 +127,17 @@ func (w *Writer) Write(out io.Writer) (*Meta, error) {
 		}
 	}
 
-	return m, nil
+	return m, idx, nil
+}
+
+func (w *Writer) shouldCreateIndex(recordsSinceIndex, bytesSinceIndex int) bool {
+	if w.indexRecordFreq > 0 {
+		return recordsSinceIndex >= w.indexRecordFreq
+	}
+
+	if w.indexByteFreq > 0 {
+		return bytesSinceIndex >= w.indexByteFreq
+	}
+
+	return false
 }
