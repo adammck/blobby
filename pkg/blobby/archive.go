@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/adammck/blobby/pkg/compactor"
 	mongoindex "github.com/adammck/blobby/pkg/impl/index/mongo"
@@ -29,6 +30,7 @@ type Blobby struct {
 	mt    *memtable.Memtable
 	bs    *blobstore.Blobstore
 	md    *metadata.Store
+	ixs   api.IndexStore
 	clock clockwork.Clock
 	comp  *compactor.Compactor
 }
@@ -40,16 +42,17 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *B
 		panic(fmt.Errorf("connectToMongo: %w", err))
 	}
 
-	idx := mongoindex.New(db)
-	bs := blobstore.New(bucket, clock, idx)
+	ixs := mongoindex.New(db)
+	bs := blobstore.New(bucket, clock)
 	md := metadata.New(mongoURL)
 
 	return &Blobby{
 		mt:    memtable.New(mongoURL, clock),
 		bs:    bs,
 		md:    md,
+		ixs:   ixs,
 		clock: clock,
-		comp:  compactor.New(bs, md, clock),
+		comp:  compactor.New(bs, md, ixs, clock),
 	}
 }
 
@@ -191,10 +194,11 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 
 	var dest string
 	var meta *sstable.Meta
+	var idx api.Index
 
 	g.Go(func() error {
 		var err error
-		dest, _, meta, err = b.bs.Flush(ctx2, ch)
+		dest, _, meta, idx, err = b.bs.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}
@@ -206,14 +210,19 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 		return stats, err
 	}
 
-	// wait until the sstable is actually readable to update the stats.
-
 	err = b.md.Insert(ctx, meta)
 	if err != nil {
 		// TODO: maybe delete the sstable(s) here, since they're orphaned.
 		return stats, fmt.Errorf("metadata.Insert: %w", err)
 	}
 
+	err = b.ixs.StoreIndex(ctx, meta.Filename(), idx)
+	if err != nil {
+		// TODO: roll back metadata insert
+		return stats, fmt.Errorf("index.StoreIndex: %w", err)
+	}
+
+	// wait until the sstable is actually readable to update the stats.
 	stats.FlushedMemtable = hPrev.Name()
 	stats.BlobName = dest
 	stats.Meta = meta

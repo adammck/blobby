@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
@@ -19,13 +20,15 @@ import (
 type Compactor struct {
 	bs    *blobstore.Blobstore
 	md    *metadata.Store
+	ixs   api.IndexStore
 	clock clockwork.Clock
 }
 
-func New(bs *blobstore.Blobstore, md *metadata.Store, clock clockwork.Clock) *Compactor {
+func New(bs *blobstore.Blobstore, md *metadata.Store, ixs api.IndexStore, clock clockwork.Clock) *Compactor {
 	return &Compactor{
 		bs:    bs,
 		md:    md,
+		ixs:   ixs,
 		clock: clock,
 	}
 }
@@ -167,10 +170,11 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 	})
 
 	var meta *sstable.Meta
+	var idx api.Index
 
 	g.Go(func() error {
 		var err error
-		_, _, meta, err = c.bs.Flush(ctx2, ch)
+		_, _, meta, idx, err = c.bs.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}
@@ -192,6 +196,13 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 	if err != nil {
 		return &CompactionStats{
 			Error: fmt.Errorf("metadata.Insert: %w", err),
+		}
+	}
+
+	err = c.ixs.StoreIndex(ctx, meta.Filename(), idx)
+	if err != nil {
+		return &CompactionStats{
+			Error: fmt.Errorf("IndexStore.StoreIndex: %w", err),
 		}
 	}
 

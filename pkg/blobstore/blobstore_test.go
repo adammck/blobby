@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	mockindex "github.com/adammck/blobby/pkg/impl/index/mock"
 	"github.com/adammck/blobby/pkg/testdeps"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
@@ -13,32 +12,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setup(t *testing.T) (context.Context, *testdeps.Env, *Blobstore, *mockindex.MockIndexStore, clockwork.Clock) {
+func setup(t *testing.T) (context.Context, *testdeps.Env, *Blobstore, clockwork.Clock) {
 	ctx := context.Background()
 	env := testdeps.New(ctx, t, testdeps.WithMinio())
 	clock := clockwork.NewFakeClock()
-	idx := mockindex.New()
-	bs := New(env.S3Bucket, clock, idx)
+	bs := New(env.S3Bucket, clock)
 
 	err := bs.Ping(ctx)
 	require.NoError(t, err)
 
-	return ctx, env, bs, idx, clock
+	return ctx, env, bs, clock
 }
 
 func TestFlushEmpty(t *testing.T) {
-	ctx, _, bs, idx, _ := setup(t)
+	ctx, _, bs, _ := setup(t)
 
 	ch := make(chan *types.Record)
 	close(ch)
 
-	_, _, _, err := bs.Flush(ctx, ch)
+	_, _, _, _, err := bs.Flush(ctx, ch)
 	assert.ErrorIs(t, err, ErrNoRecords)
-	assert.Len(t, idx.Contents, 0)
+	//assert.Len(t, idx.Contents, 0)
 }
 
 func TestFlush(t *testing.T) {
-	ctx, _, bs, idx, clock := setup(t)
+	ctx, _, bs, clock := setup(t)
 
 	ch := make(chan *types.Record)
 	go func() {
@@ -55,14 +53,14 @@ func TestFlush(t *testing.T) {
 		close(ch)
 	}()
 
-	_, n, meta, err := bs.Flush(ctx, ch)
+	_, n, meta, _, err := bs.Flush(ctx, ch)
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
 	assert.Equal(t, "test1", meta.MinKey)
 	assert.Equal(t, "test2", meta.MaxKey)
 
 	// check that an index was written. the contents don't matter.
-	assert.Len(t, idx.Contents, 1)
+	//assert.Len(t, idx.Contents, 1)
 
 	rec1, _, err := bs.Find(ctx, meta.Filename(), "test1")
 	require.NoError(t, err)
@@ -83,7 +81,7 @@ func TestFlush(t *testing.T) {
 }
 
 func TestGetNonExistentFile(t *testing.T) {
-	ctx, _, bs, _, _ := setup(t)
+	ctx, _, bs, _ := setup(t)
 	_, _, err := bs.Find(ctx, "nonexistent.sstable", "test1")
 	assert.Error(t, err)
 }
