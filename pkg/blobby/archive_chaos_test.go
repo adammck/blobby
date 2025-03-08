@@ -126,9 +126,15 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 		require.Equal(t, expected, actual,
 			"key %s: expected %q, got %q from %s",
 			key, expected, actual, stats.Source)
+		state.stats.incr(stats)
 		verified++
 	}
 	t.Logf("Verified %d keys", verified)
+
+	t.Logf("Stats: read %d blobs, scanned %d records total, scanned %d record in worst case",
+		state.stats.blobsFetched,
+		state.stats.totalTecordsScanned,
+		state.stats.maxRecordsScanned)
 }
 
 type operation interface {
@@ -138,6 +144,22 @@ type operation interface {
 
 type testState struct {
 	values map[string][]byte
+	stats  testStats
+}
+
+type testStats struct {
+	blobsFetched        uint64
+	totalTecordsScanned uint64
+	maxRecordsScanned   uint64
+}
+
+func (s *testStats) incr(stats *GetStats) {
+	s.blobsFetched += uint64(stats.BlobsFetched)
+	s.totalTecordsScanned += uint64(stats.RecordsScanned)
+
+	if uint64(stats.RecordsScanned) > s.maxRecordsScanned {
+		s.maxRecordsScanned = uint64(stats.RecordsScanned)
+	}
 }
 
 func selectKey(cfg chaosTestConfig) string {
@@ -187,6 +209,8 @@ func (o getOp) run(t *testing.T, ctx context.Context, b *Blobby, state *testStat
 	if err != nil {
 		return fmt.Errorf("get: %v", err)
 	}
+
+	state.stats.incr(stats)
 
 	if !exists {
 		if actual != nil {
