@@ -24,7 +24,8 @@ type Blobby struct {
 }
 
 func New(mongoURL, bucket string, clock clockwork.Clock) *Blobby {
-	bs := blobstore.New(bucket, clock)
+	// TODO: hook up index store.
+	bs := blobstore.New(bucket, clock, nil)
 	md := metadata.New(mongoURL)
 
 	return &Blobby{

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -20,12 +21,14 @@ type Blobstore struct {
 	bucket string
 	s3     *s3.Client
 	clock  clockwork.Clock
+	idx    api.IndexStore
 }
 
-func New(bucket string, clock clockwork.Clock) *Blobstore {
+func New(bucket string, clock clockwork.Clock, idx api.IndexStore) *Blobstore {
 	return &Blobstore{
 		bucket: bucket,
 		clock:  clock,
+		idx:    idx,
 	}
 }
 
@@ -121,7 +124,7 @@ func (bs *Blobstore) Init(ctx context.Context) error {
 }
 
 // TODO: remove most of the return values; meta contains everything.
-func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (dest string, count int, meta *sstable.Meta, err error) {
+func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record, opts ...sstable.WriterOption) (dest string, count int, meta *sstable.Meta, err error) {
 	f, err := os.CreateTemp("", "sstable-*")
 	if err != nil {
 		return "", 0, nil, fmt.Errorf("CreateTemp: %w", err)
@@ -129,7 +132,7 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (dest str
 	defer os.Remove(f.Name())
 	defer f.Close()
 
-	w := sstable.NewWriter(bs.clock)
+	w := sstable.NewWriter(bs.clock, opts...)
 
 	n := 0
 	for rec := range ch {
@@ -145,7 +148,8 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (dest str
 		return "", 0, nil, ErrNoRecords
 	}
 
-	meta, _, err = w.Write(f)
+	var idx api.Index
+	meta, idx, err = w.Write(f)
 	if err != nil {
 		return "", 0, nil, fmt.Errorf("sstable.Write: %w", err)
 	}
@@ -171,6 +175,12 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record) (dest str
 	})
 	if err != nil {
 		return "", 0, nil, fmt.Errorf("PutObject: %w", err)
+	}
+
+	// TODO: could do this concurrently with the blob write.
+	err = bs.idx.StoreIndex(ctx, meta.Filename(), idx)
+	if err != nil {
+		return "", 0, nil, fmt.Errorf("StoreIndex: %w", err)
 	}
 
 	return key, n, meta, nil

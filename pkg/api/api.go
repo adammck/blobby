@@ -13,7 +13,7 @@ type IndexEntry struct {
 }
 
 type IndexStore interface {
-	StoreIndex(ctx context.Context, filename string, entries []IndexEntry) error
-	GetIndex(ctx context.Context, filename string) ([]IndexEntry, error)
+	StoreIndex(ctx context.Context, filename string, entries Index) error
+	GetIndex(ctx context.Context, filename string) (Index, error)
 	DeleteIndex(ctx context.Context, filename string) error
 }
