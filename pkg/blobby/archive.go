@@ -4,15 +4,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/adammck/blobby/pkg/compactor"
+	mongoindex "github.com/adammck/blobby/pkg/impl/index/mongo"
 	"github.com/adammck/blobby/pkg/memtable"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/sync/errgroup"
+)
+
+const (
+	defaultDB         = "blobby"
+	connectionTimeout = 3 * time.Second
+	pingTimeout       = 3 * time.Second
 )
 
 type Blobby struct {
@@ -23,9 +33,15 @@ type Blobby struct {
 	comp  *compactor.Compactor
 }
 
-func New(mongoURL, bucket string, clock clockwork.Clock) *Blobby {
-	// TODO: hook up index store.
-	bs := blobstore.New(bucket, clock, nil)
+func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *Blobby {
+	db, err := connectToMongo(ctx, mongoURL)
+	if err != nil {
+		// TODO: return error, obviously
+		panic(fmt.Errorf("connectToMongo: %w", err))
+	}
+
+	idx := mongoindex.New(db)
+	bs := blobstore.New(bucket, clock, idx)
 	md := metadata.New(mongoURL)
 
 	return &Blobby{
@@ -35,6 +51,22 @@ func New(mongoURL, bucket string, clock clockwork.Clock) *Blobby {
 		clock: clock,
 		comp:  compactor.New(bs, md, clock),
 	}
+}
+
+func connectToMongo(ctx context.Context, mongoURL string) (*mongo.Database, error) {
+	opt := options.Client().ApplyURI(mongoURL).SetTimeout(connectionTimeout)
+	client, err := mongo.Connect(ctx, opt)
+	if err != nil {
+		return nil, err
+	}
+
+	ctxPing, cancel := context.WithTimeout(ctx, pingTimeout)
+	defer cancel()
+	if err := client.Ping(ctxPing, nil); err != nil {
+		return nil, err
+	}
+
+	return client.Database(defaultDB), nil
 }
 
 func (b *Blobby) Ping(ctx context.Context) error {

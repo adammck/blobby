@@ -18,7 +18,7 @@ func setup(t *testing.T, clock clockwork.Clock) (context.Context, *testdeps.Env,
 	ctx := context.Background()
 	env := testdeps.New(ctx, t, testdeps.WithMongo(), testdeps.WithMinio())
 
-	b := New(env.MongoURL(), env.S3Bucket, clock)
+	b := New(ctx, env.MongoURL(), env.S3Bucket, clock)
 
 	err := b.Init(ctx)
 	require.NoError(t, err)
