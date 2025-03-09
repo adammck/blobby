@@ -45,11 +45,9 @@ func readOne(r io.Reader) ([]byte, error) {
 	// see: https://bsonspec.org/spec.html
 
 	var sizeBytes [4]byte
-	if _, err := io.ReadFull(r, sizeBytes[:]); err != nil {
-		if err == io.EOF {
-			return nil, io.EOF
-		}
-		return nil, err
+	_, err := io.ReadFull(r, sizeBytes[:])
+	if err != nil {
+		return nil, fmt.Errorf("ReadFull(size): %w", err)
 	}
 
 	size := int(binary.LittleEndian.Uint32(sizeBytes[:]))
@@ -59,8 +57,9 @@ func readOne(r io.Reader) ([]byte, error) {
 
 	docBytes := make([]byte, size)
 	copy(docBytes[0:4], sizeBytes[:])
-	if _, err := io.ReadFull(r, docBytes[4:]); err != nil {
-		return nil, err
+	_, err = io.ReadFull(r, docBytes[4:])
+	if err != nil {
+		return nil, fmt.Errorf("ReadFull(doc): %w", err)
 	}
 
 	return docBytes, nil
