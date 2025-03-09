@@ -30,50 +30,9 @@ func New(bucket string, clock clockwork.Clock) *Blobstore {
 	}
 }
 
-type GetStats struct {
-	// The URL of the blob that was fetched.
-	Source string
-
-	// The number of records which were scanned until the key was found.
-	RecordsScanned int
-}
-
-func (bs *Blobstore) Find(ctx context.Context, fn string, key string) (*types.Record, *GetStats, error) {
-	reader, err := bs.Get(ctx, fn)
-	if err != nil {
-		return nil, nil, fmt.Errorf("getSST: %w", err)
-	}
-	defer reader.Close()
-
-	var rec *types.Record
-	stats := &GetStats{
-		Source: fn,
-	}
-
-	for {
-		rec, err = reader.Next()
-		if err != nil {
-			return nil, stats, fmt.Errorf("Next: %w", err)
-		}
-		if rec == nil {
-			// end of file
-			return nil, stats, nil
-		}
-
-		stats.RecordsScanned++
-
-		// TODO: index the file so we can grab a range
-		if rec.Key == key {
-			break
-		}
-	}
-
-	return rec, stats, nil
-}
-
-// Get reads a single SSTable from the blobstore.
+// GetFull reads a single SSTable from the blobstore.
 // The caller must call Close on the reader when finished.
-func (bs *Blobstore) Get(ctx context.Context, key string) (*sstable.Reader, error) {
+func (bs *Blobstore) GetFull(ctx context.Context, key string) (*sstable.Reader, error) {
 	s3client, err := bs.getS3(ctx)
 	if err != nil {
 		return nil, err
@@ -92,6 +51,37 @@ func (bs *Blobstore) Get(ctx context.Context, key string) (*sstable.Reader, erro
 		return nil, fmt.Errorf("NewReader: %w", err)
 	}
 
+	return reader, nil
+}
+
+// GetPartial reads a byte range of an SSTable from the blob store. This is much
+// faster than reading the entire blob. The first and last args are inclusive,
+// per RFC 7233
+func (bs *Blobstore) GetPartial(ctx context.Context, key string, first, last int64) (*sstable.Reader, error) {
+	s3c, err := bs.getS3(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if first == 0 {
+		return nil, fmt.Errorf("first must be greater than zero; use GetFull to read the entire blob")
+	}
+
+	rang := fmt.Sprintf("bytes=%d-", first)
+	if last > 0 {
+		rang += fmt.Sprintf("%d", last)
+	}
+
+	output, err := s3c.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: &bs.bucket,
+		Key:    &key,
+		Range:  aws.String(rang),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("GetObject: %w", err)
+	}
+
+	reader := sstable.NewPartialReader(output.Body)
 	return reader, nil
 }
 

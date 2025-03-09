@@ -18,18 +18,20 @@ import (
 )
 
 type Compactor struct {
-	bs    *blobstore.Blobstore
-	md    *metadata.Store
-	ixs   api.IndexStore
-	clock clockwork.Clock
+	bs        *blobstore.Blobstore
+	md        *metadata.Store
+	ixs       api.IndexStore
+	flushOpts []sstable.WriterOption
+	clock     clockwork.Clock
 }
 
-func New(bs *blobstore.Blobstore, md *metadata.Store, ixs api.IndexStore, clock clockwork.Clock) *Compactor {
+func New(clock clockwork.Clock, bs *blobstore.Blobstore, md *metadata.Store, ixs api.IndexStore, flushOpts []sstable.WriterOption) *Compactor {
 	return &Compactor{
-		bs:    bs,
-		md:    md,
-		ixs:   ixs,
-		clock: clock,
+		clock:     clock,
+		bs:        bs,
+		md:        md,
+		ixs:       ixs,
+		flushOpts: flushOpts,
 	}
 }
 
@@ -131,7 +133,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 
 	readers := make([]*sstable.Reader, len(cc.Inputs))
 	for i, m := range cc.Inputs {
-		r, err := c.bs.Get(ctx, m.Filename())
+		r, err := c.bs.GetFull(ctx, m.Filename())
 		if err != nil {
 			stats.Error = fmt.Errorf("getSST(%s): %w", m.Filename(), err)
 			return stats
@@ -174,7 +176,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 
 	g.Go(func() error {
 		var err error
-		_, _, meta, idx, err = c.bs.Flush(ctx2, ch)
+		_, _, meta, idx, err = c.bs.Flush(ctx2, ch, c.flushOpts...)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}

@@ -35,6 +35,7 @@ func WithIndexEveryNBytes(n int) WriterOption {
 	}
 }
 
+// TODO: Make the clock an option, too.
 func NewWriter(clock clockwork.Clock, options ...WriterOption) *Writer {
 	w := &Writer{
 		clock: clock,
@@ -87,8 +88,8 @@ func (w *Writer) Write(out io.Writer) (*Meta, api.Index, error) {
 	idxBytes := 0
 
 	var idx api.Index
-	for _, record := range w.records {
-		if w.shouldCreateIndex(idxRecs, idxBytes) {
+	for i, record := range w.records {
+		if i == 0 || w.shouldCreateIndex(idxRecs, idxBytes) {
 			idx = append(idx, api.IndexEntry{
 				Key:    record.Key,
 				Offset: offset,

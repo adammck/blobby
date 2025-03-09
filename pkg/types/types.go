@@ -47,7 +47,8 @@ func readOne(r io.Reader) ([]byte, error) {
 	var sizeBytes [4]byte
 	_, err := io.ReadFull(r, sizeBytes[:])
 	if err != nil {
-		return nil, fmt.Errorf("ReadFull(size): %w", err)
+		// might be io.EOF; that's okay.
+		return nil, err
 	}
 
 	size := int(binary.LittleEndian.Uint32(sizeBytes[:]))
