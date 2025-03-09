@@ -115,7 +115,7 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 		}
 
 		err := op.run(t, ctx, b, state)
-		require.NoError(t, err)
+		require.NoError(t, err, "op=%#v", op)
 	}
 
 	t.Log("Verifying final state...")
@@ -131,10 +131,11 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 	}
 	t.Logf("Verified %d keys", verified)
 
-	t.Logf("Stats: read %d blobs, scanned %d records total, scanned %d record in worst case",
-		state.stats.blobsFetched,
-		state.stats.totalTecordsScanned,
-		state.stats.maxRecordsScanned)
+	t.Log("Stats:")
+	t.Logf("- blobs fetched: %d", state.stats.blobsFetched)
+	t.Logf("- records scanned: %d", state.stats.totalRecordsScanned)
+	t.Logf("- worst scan: %d recs", state.stats.maxRecordsScanned)
+	t.Logf("- mean scan: %.1f recs", float64(state.stats.totalRecordsScanned)/float64(state.stats.numGets))
 }
 
 type operation interface {
@@ -148,15 +149,16 @@ type testState struct {
 }
 
 type testStats struct {
+	numGets             uint64
 	blobsFetched        uint64
-	totalTecordsScanned uint64
+	totalRecordsScanned uint64
 	maxRecordsScanned   uint64
 }
 
 func (s *testStats) incr(stats *GetStats) {
+	s.numGets += 1
 	s.blobsFetched += uint64(stats.BlobsFetched)
-	s.totalTecordsScanned += uint64(stats.RecordsScanned)
-
+	s.totalRecordsScanned += uint64(stats.RecordsScanned)
 	if uint64(stats.RecordsScanned) > s.maxRecordsScanned {
 		s.maxRecordsScanned = uint64(stats.RecordsScanned)
 	}
