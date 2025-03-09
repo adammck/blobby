@@ -4,36 +4,82 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/adammck/blobby/pkg/compactor"
+	mongoindex "github.com/adammck/blobby/pkg/impl/index/mongo"
 	"github.com/adammck/blobby/pkg/memtable"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/sync/errgroup"
+)
+
+const (
+	defaultDB         = "blobby"
+	connectionTimeout = 3 * time.Second
+	pingTimeout       = 3 * time.Second
 )
 
 type Blobby struct {
 	mt    *memtable.Memtable
 	bs    *blobstore.Blobstore
 	md    *metadata.Store
+	ixs   api.IndexStore
 	clock clockwork.Clock
 	comp  *compactor.Compactor
+
+	// Options for the SSTable writer.
+	fopts []sstable.WriterOption
 }
 
-func New(mongoURL, bucket string, clock clockwork.Clock) *Blobby {
+func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *Blobby {
+	db, err := connectToMongo(ctx, mongoURL)
+	if err != nil {
+		// TODO: return error, obviously
+		panic(fmt.Errorf("connectToMongo: %w", err))
+	}
+
+	ixs := mongoindex.New(db)
 	bs := blobstore.New(bucket, clock)
 	md := metadata.New(mongoURL)
+
+	// TODO: make this configurable
+	// TODO: also use more sensible defaults
+	fopts := []sstable.WriterOption{
+		sstable.WithIndexEveryNRecords(32),
+	}
 
 	return &Blobby{
 		mt:    memtable.New(mongoURL, clock),
 		bs:    bs,
 		md:    md,
+		ixs:   ixs,
 		clock: clock,
-		comp:  compactor.New(bs, md, clock),
+		comp:  compactor.New(clock, bs, md, ixs, fopts),
+		fopts: fopts,
 	}
+}
+
+func connectToMongo(ctx context.Context, mongoURL string) (*mongo.Database, error) {
+	opt := options.Client().ApplyURI(mongoURL).SetTimeout(connectionTimeout)
+	client, err := mongo.Connect(ctx, opt)
+	if err != nil {
+		return nil, err
+	}
+
+	ctxPing, cancel := context.WithTimeout(ctx, pingTimeout)
+	defer cancel()
+	if err := client.Ping(ctxPing, nil); err != nil {
+		return nil, err
+	}
+
+	return client.Database(defaultDB), nil
 }
 
 func (b *Blobby) Ping(ctx context.Context) error {
@@ -95,14 +141,59 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetS
 
 	// note: this assumes that metas is already sorted.
 	for _, meta := range metas {
-		rec, bstats, err := b.bs.Find(ctx, meta.Filename(), key)
+
+		// fetch the index for this sstable.
+		ixs, err := b.ixs.GetIndex(ctx, meta.Filename())
 		if err != nil {
-			return nil, stats, fmt.Errorf("blobstore.Get: %w", err)
+			if !errors.Is(err, &api.IndexNotFound{}) {
+				return nil, stats, fmt.Errorf("index.GetIndex(%s): %w", meta.Filename(), err)
+			}
+		}
+
+		var r *sstable.Reader
+		var first, last int64
+
+		// find the byte range we need to look at for this key.
+		// TODO: extract this into a func so we can test it.
+		// TODO: cache the index in-process; it's immutable.
+		// TODO: materialize the index, so we can use binary search.
+		for i := range ixs {
+			if ixs[i].Key < key {
+				first = ixs[i].Offset
+			}
+			if ixs[i].Key > key {
+				// Offset is the first byte of the next segment, and byte range
+				// fetch is inclusive, so stop before it.
+				last = ixs[i].Offset - 1
+				break
+			}
+		}
+
+		if first > 0 {
+			r, err = b.bs.GetPartial(ctx, meta.Filename(), first, last)
+			if err != nil {
+				return nil, stats, fmt.Errorf("blobstore.GetPartial: %w", err)
+			}
+		} else {
+			// if the index couldn't be fetched, that's not ideal, but we can
+			// just read the entire sstable. hope it's not too big.
+			r, err = b.bs.GetFull(ctx, meta.Filename())
+			if err != nil {
+				return nil, stats, fmt.Errorf("blobstore.Get: %w", err)
+			}
+		}
+
+		defer r.Close()
+
+		var scanned int
+		rec, scanned, err = b.Scan(ctx, r, key)
+		if err != nil {
+			return nil, stats, fmt.Errorf("Blobby.Scan: %w", err)
 		}
 
 		// accumulate stats as we go
 		stats.BlobsFetched++
-		stats.RecordsScanned += bstats.RecordsScanned
+		stats.RecordsScanned += scanned
 
 		if rec != nil {
 			// return as soon as we find the first record, but that's wrong!
@@ -110,13 +201,38 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetS
 			// check whether any of the remaining metas have a minTime newer
 			// than that. this is only possible after a weird compaction.
 			// TODO: fix this!
-			stats.Source = bstats.Source
+			stats.Source = meta.Filename()
 			return rec.Document, stats, nil
 		}
 	}
 
 	// key not found
 	return nil, stats, nil
+}
+
+func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (*types.Record, int, error) {
+	var rec *types.Record
+	var scanned int
+	var err error
+
+	for {
+		rec, err = reader.Next()
+		if err != nil {
+			return nil, scanned, fmt.Errorf("sstable.Reader.Next: %w", err)
+		}
+		if rec == nil {
+			// end of file
+			return nil, scanned, nil
+		}
+
+		scanned++
+
+		if rec.Key == key {
+			break
+		}
+	}
+
+	return rec, scanned, nil
 }
 
 type FlushStats struct {
@@ -158,10 +274,11 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 
 	var dest string
 	var meta *sstable.Meta
+	var idx api.Index
 
 	g.Go(func() error {
 		var err error
-		dest, _, meta, err = b.bs.Flush(ctx2, ch)
+		dest, _, meta, idx, err = b.bs.Flush(ctx2, ch, b.fopts...)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}
@@ -173,14 +290,19 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 		return stats, err
 	}
 
-	// wait until the sstable is actually readable to update the stats.
-
 	err = b.md.Insert(ctx, meta)
 	if err != nil {
 		// TODO: maybe delete the sstable(s) here, since they're orphaned.
 		return stats, fmt.Errorf("metadata.Insert: %w", err)
 	}
 
+	err = b.ixs.StoreIndex(ctx, meta.Filename(), idx)
+	if err != nil {
+		// TODO: roll back metadata insert
+		return stats, fmt.Errorf("index.StoreIndex: %w", err)
+	}
+
+	// wait until the sstable is actually readable to update the stats.
 	stats.FlushedMemtable = hPrev.Name()
 	stats.BlobName = dest
 	stats.Meta = meta

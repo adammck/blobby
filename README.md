@@ -1,8 +1,9 @@
 # Blobby
 
 This is my key-val store on a blob store. There are many like it, but this one
-is mine. Don't expect much, I'm just having a bit of fun. Use something like
-[SlateDB][] if you need this for real.
+is mine. Don't expect much, I'm just having a bit of fun and learning how to use
+Claude and Copilot more effectively. Use something like [SlateDB][] if you need
+this for real.
 
 ## Getting Started
 

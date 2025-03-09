@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/assert"
@@ -31,13 +32,73 @@ func TestWriteRecords(t *testing.T) {
 	_ = w.Add(&types.Record{Key: "key2", Timestamp: ts2, Document: []byte("doc2")})
 
 	var buf bytes.Buffer
-	meta, err := w.Write(&buf)
+	meta, idx, err := w.Write(&buf)
 	require.NoError(t, err)
 	assert.Equal(t, 2, meta.Count)
 	assert.Equal(t, "key1", meta.MinKey)
 	assert.Equal(t, "key2", meta.MaxKey)
 	assert.Equal(t, ts1, meta.MinTime)
 	assert.Equal(t, ts2, meta.MaxTime)
+	assert.Empty(t, idx)
+}
+
+func TestWriteWithIndex(t *testing.T) {
+	w, c := newWriter(WithIndexEveryNRecords(2))
+	ts := c.Now()
+
+	recs := []*types.Record{
+		{Key: "key1", Timestamp: ts, Document: []byte("doc1")},
+		{Key: "key2", Timestamp: ts, Document: []byte("doc2")},
+		{Key: "key3", Timestamp: ts, Document: []byte("doc3")},
+		{Key: "key4", Timestamp: ts, Document: []byte("doc4")},
+		{Key: "key5", Timestamp: ts, Document: []byte("doc5")},
+	}
+
+	for _, r := range recs {
+		err := w.Add(r)
+		require.NoError(t, err)
+	}
+
+	var buf bytes.Buffer
+	_, idx, err := w.Write(&buf)
+	require.NoError(t, err)
+	require.Len(t, idx, 2)
+	require.Equal(t, "key3", idx[0].Key)
+	require.Equal(t, "key5", idx[1].Key)
+}
+
+func TestWriteWithIndexByteFreq(t *testing.T) {
+	recNum := 20
+	recSize := 77 // will become wrong if encoding changes
+
+	w, c := newWriter(WithIndexEveryNBytes(256))
+	ts := c.Now()
+
+	for i := range recNum {
+		err := w.Add(&types.Record{
+			Key:       fmt.Sprintf("k%d", i+101),
+			Timestamp: ts,
+			Document:  []byte("abcdefghijklmnopqrstuvwxyz0123456789"), // 36 bytes
+		})
+		require.NoError(t, err)
+	}
+
+	var buf bytes.Buffer
+	meta, idx, err := w.Write(&buf)
+	require.NoError(t, err)
+
+	// if these fail, the test is broken, maybe not the implementation.
+	require.Equal(t, recNum, meta.Count, "unexpected record count")
+	require.Equal(t, int64(len(magicBytes)+(recNum*recSize)), meta.Size, "unexpected total size; check recSize")
+
+	// 256 bytes per segment, 77 bytes per record -> 4 records per segment. the
+	// index entry appears before the *next* record.
+	require.Equal(t, api.Index{
+		{Key: "k105", Offset: int64(len(magicBytes) + (recSize * 4))},
+		{Key: "k109", Offset: int64(len(magicBytes) + (recSize * 8))},
+		{Key: "k113", Offset: int64(len(magicBytes) + (recSize * 12))},
+		{Key: "k117", Offset: int64(len(magicBytes) + (recSize * 16))},
+	}, idx)
 }
 
 func TestWriteRecordsReverseTimes(t *testing.T) {
@@ -50,7 +111,7 @@ func TestWriteRecordsReverseTimes(t *testing.T) {
 	_ = w.Add(&types.Record{Key: "key2", Timestamp: ts1, Document: []byte("doc2")})
 
 	var buf bytes.Buffer
-	meta, err := w.Write(&buf)
+	meta, _, err := w.Write(&buf)
 	require.NoError(t, err)
 	assert.Equal(t, ts1, meta.MinTime)
 	assert.Equal(t, ts2, meta.MaxTime)
@@ -62,7 +123,7 @@ func TestWriteTimestampsWithSingleRecord(t *testing.T) {
 	_ = w.Add(&types.Record{Key: "key1", Timestamp: ts, Document: []byte("doc1")})
 
 	var buf bytes.Buffer
-	meta, err := w.Write(&buf)
+	meta, _, err := w.Write(&buf)
 	require.NoError(t, err)
 	assert.Equal(t, ts, meta.MinTime)
 	assert.Equal(t, ts, meta.MaxTime)
@@ -90,7 +151,7 @@ func TestWriteError(t *testing.T) {
 	w.Add(&types.Record{Key: "key1", Timestamp: c.Now(), Document: []byte("doc1")})
 
 	fw := &writeFailer{}
-	_, err := w.Write(fw)
+	_, _, err := w.Write(fw)
 	assert.Error(t, err)
 }
 
@@ -110,7 +171,7 @@ func TestWriteOrder(t *testing.T) {
 	w.Add(&types.Record{Key: "key1", Timestamp: ts1, Document: []byte("k1t1")})
 
 	var buf bytes.Buffer
-	_, err := w.Write(&buf)
+	_, _, err := w.Write(&buf)
 	require.NoError(t, err)
 
 	r, err := NewReader(io.NopCloser(&buf))
@@ -152,8 +213,8 @@ func (w *writeFailer) Write(p []byte) (n int, err error) {
 	return 0, fmt.Errorf("injected write failure")
 }
 
-func newWriter() (*Writer, clockwork.Clock) {
+func newWriter(opts ...WriterOption) (*Writer, clockwork.Clock) {
 	c := clockwork.NewFakeClock()
-	w := NewWriter(c)
+	w := NewWriter(c, opts...)
 	return w, c
 }

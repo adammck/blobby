@@ -18,7 +18,7 @@ func setup(t *testing.T, clock clockwork.Clock) (context.Context, *testdeps.Env,
 	ctx := context.Background()
 	env := testdeps.New(ctx, t, testdeps.WithMongo(), testdeps.WithMinio())
 
-	b := New(env.MongoURL(), env.S3Bucket, clock)
+	b := New(ctx, env.MongoURL(), env.S3Bucket, clock)
 
 	err := b.Init(ctx)
 	require.NoError(t, err)
@@ -306,7 +306,7 @@ func TestBasicWriteRead(t *testing.T) {
 
 	// check that the old sstables were deleted.
 	for _, ts := range []instant{t2, t3, t4} {
-		_, _, err = b.bs.Find(ctx, ts.sstable, "001")
+		_, err = b.bs.GetFull(ctx, ts.sstable)
 		require.Error(t, err)
 	}
 
@@ -395,14 +395,14 @@ func TestBasicWriteRead(t *testing.T) {
 	}, gstats)
 
 	// verify the old uncompacted sstables still exist
-	_, _, err = b.bs.Find(ctx, t5.sstable, "001")
+	_, err = b.bs.GetFull(ctx, t5.sstable)
 	require.NoError(t, err)
-	_, _, err = b.bs.Find(ctx, t6.sstable, "101")
+	_, err = b.bs.GetFull(ctx, t6.sstable)
 	require.NoError(t, err)
 
 	// verify the compacted sstables were deleted
 	for _, ins := range []instant{t7, t8} {
-		_, _, err = b.bs.Find(ctx, ins.sstable, "001")
+		_, err = b.bs.GetFull(ctx, ins.sstable)
 		require.Error(t, err)
 	}
 
