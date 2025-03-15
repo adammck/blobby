@@ -45,3 +45,19 @@ func (r *Reader) Next() (*types.Record, error) {
 func (r *Reader) Close() error {
 	return r.rc.Close()
 }
+
+// Map reads the entire SSTable and returns it as a map. This is useful for
+// tests, but should never be used in non-test code.
+func (r *Reader) Map() map[string]*types.Record {
+	recs := map[string]*types.Record{}
+
+	for {
+		rec, err := r.Next()
+		if err != nil {
+			break
+		}
+		recs[rec.Key] = rec
+	}
+
+	return recs
+}

@@ -53,33 +53,27 @@ func TestFlush(t *testing.T) {
 		close(ch)
 	}()
 
-	_, n, meta, _, err := bs.Flush(ctx, ch)
+	_, n, meta, idx, err := bs.Flush(ctx, ch)
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
 	assert.Equal(t, "test1", meta.MinKey)
 	assert.Equal(t, "test2", meta.MaxKey)
 
 	// check that an index was written. the contents don't matter.
-	//assert.Len(t, idx.Contents, 1)
+	assert.Greater(t, len(idx), 0)
 
-	// TODO: Fix these. They were removed when Find was moved to Archive.
+	// both records were written.
+	sst, err := bs.GetFull(ctx, meta.Filename())
+	require.NoError(t, err)
+	recs := sst.Map()
+	assert.Contains(t, recs, "test1")
+	assert.Contains(t, recs, "test2")
+	assert.Equal(t, []byte("doc1"), recs["test1"].Document)
+	assert.Equal(t, []byte("doc2"), recs["test2"].Document)
 
-	// rec1, _, err := bs.Find(ctx, meta.Filename(), "test1")
-	// require.NoError(t, err)
-	// assert.NotNil(t, rec1)
-	// assert.Equal(t, "test1", rec1.Key)
-	// assert.Equal(t, []byte("doc1"), rec1.Document)
-
-	// rec2, _, err := bs.Find(ctx, meta.Filename(), "test2")
-	// require.NoError(t, err)
-	// assert.NotNil(t, rec2)
-	// assert.Equal(t, "test2", rec2.Key)
-	// assert.Equal(t, []byte("doc2"), rec2.Document)
-
-	// // unknown key
-	// rec3, _, err := bs.Find(ctx, meta.Filename(), "test3")
-	// require.NoError(t, err)
-	// assert.Nil(t, rec3)
+	// unknown key
+	assert.NotContains(t, recs, "test3")
+	assert.Nil(t, recs["test3"].Document)
 }
 
 func TestGetNonExistentFile(t *testing.T) {
