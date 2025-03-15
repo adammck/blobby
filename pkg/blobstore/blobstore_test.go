@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	testsst "github.com/adammck/blobby/pkg/sstable/testutil"
 	"github.com/adammck/blobby/pkg/testdeps"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
@@ -65,7 +66,7 @@ func TestFlush(t *testing.T) {
 	// both records were written.
 	sst, err := bs.GetFull(ctx, meta.Filename())
 	require.NoError(t, err)
-	recs := sst.Map()
+	recs := testsst.Map(t, sst)
 	assert.Contains(t, recs, "test1")
 	assert.Contains(t, recs, "test2")
 	assert.Equal(t, []byte("doc1"), recs["test1"].Document)
@@ -73,7 +74,7 @@ func TestFlush(t *testing.T) {
 
 	// unknown key
 	assert.NotContains(t, recs, "test3")
-	assert.Nil(t, recs["test3"].Document)
+	assert.Nil(t, recs["test3"])
 }
 
 func TestGetNonExistentFile(t *testing.T) {

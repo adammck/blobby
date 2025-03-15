@@ -25,12 +25,17 @@ type Writer struct {
 
 type WriterOption func(*Writer)
 
+// WithIndexEveryNRecords instructs the writer to emit an index entry every n
+// records, starting with the first.
 func WithIndexEveryNRecords(n int) WriterOption {
 	return func(w *Writer) {
 		w.indexRecordFreq = n
 	}
 }
 
+// WithIndexEveryNBytes instructs the writer to emit an index entry every n
+// bytes. This is not exact, because the size of an entry is unknown until it's
+// wrritten, but it'll exceed n by one record at most.
 func WithIndexEveryNBytes(n int) WriterOption {
 	return func(w *Writer) {
 		w.indexByteFreq = n

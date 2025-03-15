@@ -32,18 +32,17 @@ func TestWriteRecords(t *testing.T) {
 	_ = w.Add(&types.Record{Key: "key2", Timestamp: ts2, Document: []byte("doc2")})
 
 	var buf bytes.Buffer
-	meta, idx, err := w.Write(&buf)
+	meta, _, err := w.Write(&buf)
 	require.NoError(t, err)
 	assert.Equal(t, 2, meta.Count)
 	assert.Equal(t, "key1", meta.MinKey)
 	assert.Equal(t, "key2", meta.MaxKey)
 	assert.Equal(t, ts1, meta.MinTime)
 	assert.Equal(t, ts2, meta.MaxTime)
-	assert.Empty(t, idx)
 }
 
 func TestWriteWithIndex(t *testing.T) {
-	w, c := newWriter(WithIndexEveryNRecords(2))
+	w, c := newWriter(WithIndexEveryNRecords(3))
 	ts := c.Now()
 
 	recs := []*types.Record{
@@ -52,6 +51,8 @@ func TestWriteWithIndex(t *testing.T) {
 		{Key: "key3", Timestamp: ts, Document: []byte("doc3")},
 		{Key: "key4", Timestamp: ts, Document: []byte("doc4")},
 		{Key: "key5", Timestamp: ts, Document: []byte("doc5")},
+		{Key: "key6", Timestamp: ts, Document: []byte("doc6")},
+		{Key: "key7", Timestamp: ts, Document: []byte("doc7")},
 	}
 
 	for _, r := range recs {
@@ -62,9 +63,10 @@ func TestWriteWithIndex(t *testing.T) {
 	var buf bytes.Buffer
 	_, idx, err := w.Write(&buf)
 	require.NoError(t, err)
-	require.Len(t, idx, 2)
-	require.Equal(t, "key3", idx[0].Key)
-	require.Equal(t, "key5", idx[1].Key)
+	require.Len(t, idx, 3)
+	require.Equal(t, "key1", idx[0].Key)
+	require.Equal(t, "key4", idx[1].Key)
+	require.Equal(t, "key7", idx[2].Key)
 }
 
 func TestWriteWithIndexByteFreq(t *testing.T) {
@@ -92,8 +94,10 @@ func TestWriteWithIndexByteFreq(t *testing.T) {
 	require.Equal(t, int64(len(magicBytes)+(recNum*recSize)), meta.Size, "unexpected total size; check recSize")
 
 	// 256 bytes per segment, 77 bytes per record -> 4 records per segment. the
-	// index entry appears before the *next* record.
+	// index entry appears before the *next* record, so the size of each segment
+	// will actually be slightly more than 256.
 	require.Equal(t, api.Index{
+		{Key: "k101", Offset: int64(len(magicBytes))},
 		{Key: "k105", Offset: int64(len(magicBytes) + (recSize * 4))},
 		{Key: "k109", Offset: int64(len(magicBytes) + (recSize * 8))},
 		{Key: "k113", Offset: int64(len(magicBytes) + (recSize * 12))},
