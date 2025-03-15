@@ -17,6 +17,8 @@ type Writer struct {
 	mu      sync.Mutex
 	clock   clockwork.Clock
 
+	// set via options on constructor.
+
 	indexRecordFreq int
 	indexByteFreq   int
 }
@@ -55,7 +57,8 @@ func (w *Writer) Add(record *types.Record) error {
 	return nil
 }
 
-// Enhanced Write method that builds and stores indices
+// Write writes the SSTable to the given writer, and returns the corresponding
+// index which should be persited somewhere via an IndexStore.
 func (w *Writer) Write(out io.Writer) (*Meta, api.Index, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

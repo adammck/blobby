@@ -135,7 +135,7 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 	t.Logf("- blobs fetched: %d", state.stats.blobsFetched)
 	t.Logf("- records scanned: %d", state.stats.totalRecordsScanned)
 	t.Logf("- worst scan: %d recs", state.stats.maxRecordsScanned)
-	t.Logf("- mean scan: %.1f recs", float64(state.stats.totalRecordsScanned)/float64(state.stats.numGets))
+	t.Logf("- mean scan: %.1f recs", state.stats.meanRecordsScanned())
 }
 
 type operation interface {
@@ -162,6 +162,10 @@ func (s *testStats) incr(stats *GetStats) {
 	if uint64(stats.RecordsScanned) > s.maxRecordsScanned {
 		s.maxRecordsScanned = uint64(stats.RecordsScanned)
 	}
+}
+
+func (s *testStats) meanRecordsScanned() float64 {
+	return float64(s.totalRecordsScanned) / float64(s.numGets)
 }
 
 func selectKey(cfg chaosTestConfig) string {

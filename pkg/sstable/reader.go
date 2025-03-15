@@ -30,7 +30,8 @@ func NewReader(rc io.ReadCloser) (*Reader, error) {
 }
 
 // NewPartialReader is like NewReader, but doesn't validate the header. This is
-// used when jumping straight into the middle of a file.
+// useful when reading a fragment of an sstable, when the relevant byte range
+// has been determined via an index.
 func NewPartialReader(rc io.ReadCloser) *Reader {
 	return &Reader{
 		rc: rc,

@@ -37,7 +37,7 @@ func (s *IndexStore) Init(ctx context.Context) error {
 	return nil
 }
 
-func (s *IndexStore) StoreIndex(ctx context.Context, filename string, entries api.Index) error {
+func (s *IndexStore) Put(ctx context.Context, filename string, entries api.Index) error {
 	bsonEntries := make([]bson.M, len(entries))
 	for i, entry := range entries {
 		bsonEntries[i] = bson.M{
@@ -60,7 +60,7 @@ func (s *IndexStore) StoreIndex(ctx context.Context, filename string, entries ap
 	return nil
 }
 
-func (s *IndexStore) GetIndex(ctx context.Context, filename string) (api.Index, error) {
+func (s *IndexStore) Get(ctx context.Context, filename string) (api.Index, error) {
 	var result bson.M
 
 	err := s.db.Collection(collection).FindOne(ctx, bson.M{kId: filename}).Decode(&result)
@@ -110,7 +110,7 @@ func (s *IndexStore) GetIndex(ctx context.Context, filename string) (api.Index, 
 	return entries, nil
 }
 
-func (s *IndexStore) DeleteIndex(ctx context.Context, filename string) error {
+func (s *IndexStore) Delete(ctx context.Context, filename string) error {
 	_, err := s.db.Collection(collection).DeleteOne(ctx, bson.M{"_id": filename})
 	if err != nil {
 		return fmt.Errorf("DeleteOne: %w", err)

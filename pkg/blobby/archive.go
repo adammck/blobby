@@ -143,10 +143,10 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetS
 	for _, meta := range metas {
 
 		// fetch the index for this sstable.
-		ixs, err := b.ixs.GetIndex(ctx, meta.Filename())
+		ixs, err := b.ixs.Get(ctx, meta.Filename())
 		if err != nil {
 			if !errors.Is(err, &api.IndexNotFound{}) {
-				return nil, stats, fmt.Errorf("index.GetIndex(%s): %w", meta.Filename(), err)
+				return nil, stats, fmt.Errorf("IndexStore.Get(%s): %w", meta.Filename(), err)
 			}
 		}
 
@@ -210,6 +210,9 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetS
 	return nil, stats, nil
 }
 
+// Scan reads from the given sstable reader until it finds a record with the
+// given key. If EOF is reached, nil is returned. For efficiency, the reader
+// should already be *near* the record by using an index.
 func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (*types.Record, int, error) {
 	var rec *types.Record
 	var scanned int
@@ -296,10 +299,10 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 		return stats, fmt.Errorf("metadata.Insert: %w", err)
 	}
 
-	err = b.ixs.StoreIndex(ctx, meta.Filename(), idx)
+	err = b.ixs.Put(ctx, meta.Filename(), idx)
 	if err != nil {
 		// TODO: roll back metadata insert
-		return stats, fmt.Errorf("index.StoreIndex: %w", err)
+		return stats, fmt.Errorf("IndexStore.Put: %w", err)
 	}
 
 	// wait until the sstable is actually readable to update the stats.

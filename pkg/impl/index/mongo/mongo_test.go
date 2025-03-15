@@ -19,7 +19,7 @@ func setup(t *testing.T) (context.Context, *IndexStore) {
 	return ctx, store
 }
 
-func TestStoreAndGetIndex(t *testing.T) {
+func TestStoreAndGet(t *testing.T) {
 	ctx, store := setup(t)
 	fn := "test.sstable"
 	entries := []api.IndexEntry{
@@ -28,10 +28,10 @@ func TestStoreAndGetIndex(t *testing.T) {
 		{Key: "c", Offset: 300},
 	}
 
-	err := store.StoreIndex(ctx, fn, entries)
+	err := store.Put(ctx, fn, entries)
 	require.NoError(t, err)
 
-	retrieved, err := store.GetIndex(ctx, fn)
+	retrieved, err := store.Get(ctx, fn)
 	require.NoError(t, err)
 	require.Len(t, retrieved, 3)
 
@@ -43,7 +43,7 @@ func TestStoreAndGetIndex(t *testing.T) {
 	require.Equal(t, int64(300), retrieved[2].Offset)
 }
 
-func TestUpdateIndex(t *testing.T) {
+func TestPut(t *testing.T) {
 	ctx, store := setup(t)
 	fn := "test.sstable"
 	entries := []api.IndexEntry{
@@ -51,7 +51,7 @@ func TestUpdateIndex(t *testing.T) {
 		{Key: "b", Offset: 200},
 	}
 
-	err := store.StoreIndex(ctx, fn, entries)
+	err := store.Put(ctx, fn, entries)
 	require.NoError(t, err)
 
 	updatedEntries := []api.IndexEntry{
@@ -59,17 +59,17 @@ func TestUpdateIndex(t *testing.T) {
 		{Key: "d", Offset: 400},
 	}
 
-	err = store.StoreIndex(ctx, fn, updatedEntries)
+	err = store.Put(ctx, fn, updatedEntries)
 	require.NoError(t, err)
 
-	retrieved, err := store.GetIndex(ctx, fn)
+	retrieved, err := store.Get(ctx, fn)
 	require.NoError(t, err)
 	require.Len(t, retrieved, 2)
 	require.Equal(t, "c", retrieved[0].Key)
 	require.Equal(t, "d", retrieved[1].Key)
 }
 
-func TestDeleteIndex(t *testing.T) {
+func TestDelete(t *testing.T) {
 	ctx, store := setup(t)
 	fn := "test.sstable"
 	entries := []api.IndexEntry{
@@ -77,19 +77,19 @@ func TestDeleteIndex(t *testing.T) {
 		{Key: "b", Offset: 200},
 	}
 
-	err := store.StoreIndex(ctx, fn, entries)
+	err := store.Put(ctx, fn, entries)
 	require.NoError(t, err)
 
-	err = store.DeleteIndex(ctx, fn)
+	err = store.Delete(ctx, fn)
 	require.NoError(t, err)
 
-	_, err = store.GetIndex(ctx, fn)
+	_, err = store.Get(ctx, fn)
 	require.Error(t, err)
 }
 
-func TestGetNonExistentIndex(t *testing.T) {
+func TestGetNonExistent(t *testing.T) {
 	ctx, store := setup(t)
 
-	_, err := store.GetIndex(ctx, "nonexistent.sstable")
+	_, err := store.Get(ctx, "nonexistent.sstable")
 	require.Error(t, err)
 }

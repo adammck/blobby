@@ -201,10 +201,10 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 		}
 	}
 
-	err = c.ixs.StoreIndex(ctx, meta.Filename(), idx)
+	err = c.ixs.Put(ctx, meta.Filename(), idx)
 	if err != nil {
 		return &CompactionStats{
-			Error: fmt.Errorf("IndexStore.StoreIndex: %w", err),
+			Error: fmt.Errorf("IndexStore.Put: %w", err),
 		}
 	}
 
