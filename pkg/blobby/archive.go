@@ -4,36 +4,90 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/adammck/blobby/pkg/compactor"
+	mindexstore "github.com/adammck/blobby/pkg/impl/indexstore/mongo"
+	"github.com/adammck/blobby/pkg/index"
 	"github.com/adammck/blobby/pkg/memtable"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/sync/errgroup"
+)
+
+const (
+	defaultDB         = "blobby"
+	connectionTimeout = 3 * time.Second
+	pingTimeout       = 3 * time.Second
 )
 
 type Blobby struct {
 	mt    *memtable.Memtable
 	bs    *blobstore.Blobstore
 	md    *metadata.Store
+	ixs   api.IndexStore
 	clock clockwork.Clock
 	comp  *compactor.Compactor
+
+	// Options for the SSTable writer.
+	fopts []sstable.WriterOption
+
+	// index cache
+	indexesMu sync.Mutex
+	indexes   map[string]*index.Index
 }
 
-func New(mongoURL, bucket string, clock clockwork.Clock) *Blobby {
+func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *Blobby {
+	db, err := connectToMongo(ctx, mongoURL)
+	if err != nil {
+		// TODO: return error, obviously
+		panic(fmt.Errorf("connectToMongo: %w", err))
+	}
+
+	ixs := mindexstore.New(db)
 	bs := blobstore.New(bucket, clock)
 	md := metadata.New(mongoURL)
+
+	// TODO: make this configurable
+	// TODO: also use more sensible defaults
+	fopts := []sstable.WriterOption{
+		sstable.WithIndexEveryNRecords(32),
+	}
 
 	return &Blobby{
 		mt:    memtable.New(mongoURL, clock),
 		bs:    bs,
 		md:    md,
+		ixs:   ixs,
 		clock: clock,
-		comp:  compactor.New(bs, md, clock),
+		comp:  compactor.New(clock, bs, md, ixs, fopts),
+		fopts: fopts,
+
+		indexes: map[string]*index.Index{},
 	}
+}
+
+func connectToMongo(ctx context.Context, mongoURL string) (*mongo.Database, error) {
+	opt := options.Client().ApplyURI(mongoURL).SetTimeout(connectionTimeout)
+	client, err := mongo.Connect(ctx, opt)
+	if err != nil {
+		return nil, err
+	}
+
+	ctxPing, cancel := context.WithTimeout(ctx, pingTimeout)
+	defer cancel()
+	if err := client.Ping(ctxPing, nil); err != nil {
+		return nil, err
+	}
+
+	return client.Database(defaultDB), nil
 }
 
 func (b *Blobby) Ping(ctx context.Context) error {
@@ -95,14 +149,45 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetS
 
 	// note: this assumes that metas is already sorted.
 	for _, meta := range metas {
-		rec, bstats, err := b.bs.Find(ctx, meta.Filename(), key)
+
+		// fetch the index for this sstable. hopefully cached.
+		idx, err := b.getIndex(ctx, meta.Filename())
 		if err != nil {
-			return nil, stats, fmt.Errorf("blobstore.Get: %w", err)
+			return nil, stats, fmt.Errorf("getIndex(%s): %w", key, err)
+		}
+
+		rng, err := idx.Lookup(key)
+		if err != nil {
+			// TODO: this need not be fatal. we can read the whole sstable.
+			return nil, stats, fmt.Errorf("Index.Lookup(%s): %w", key, err)
+		}
+
+		var r *sstable.Reader
+		if rng != nil {
+			r, err = b.bs.GetPartial(ctx, meta.Filename(), rng.First, rng.Last)
+			if err != nil {
+				return nil, stats, fmt.Errorf("blobstore.GetPartial: %w", err)
+			}
+		} else {
+			// if the index couldn't be fetched, that's not ideal, but we can
+			// just read the entire sstable. hope it's not too big.
+			r, err = b.bs.GetFull(ctx, meta.Filename())
+			if err != nil {
+				return nil, stats, fmt.Errorf("blobstore.Get: %w", err)
+			}
+		}
+
+		defer r.Close()
+
+		var scanned int
+		rec, scanned, err = b.Scan(ctx, r, key)
+		if err != nil {
+			return nil, stats, fmt.Errorf("Blobby.Scan: %w", err)
 		}
 
 		// accumulate stats as we go
 		stats.BlobsFetched++
-		stats.RecordsScanned += bstats.RecordsScanned
+		stats.RecordsScanned += scanned
 
 		if rec != nil {
 			// return as soon as we find the first record, but that's wrong!
@@ -110,13 +195,63 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetS
 			// check whether any of the remaining metas have a minTime newer
 			// than that. this is only possible after a weird compaction.
 			// TODO: fix this!
-			stats.Source = bstats.Source
+			stats.Source = meta.Filename()
 			return rec.Document, stats, nil
 		}
 	}
 
 	// key not found
 	return nil, stats, nil
+}
+
+// getIndex returns the index for the given sstable. If the index is not already
+// cached, it will be fetched from the index store and cached forever.
+//
+// TODO: add some kind of expiration policy.
+func (b *Blobby) getIndex(ctx context.Context, fn string) (*index.Index, error) {
+	b.indexesMu.Lock()
+	defer b.indexesMu.Unlock()
+
+	if ix, ok := b.indexes[fn]; ok {
+		return ix, nil
+	}
+
+	ixs, err := b.ixs.Get(ctx, fn)
+	if err != nil && !errors.Is(err, &api.IndexNotFound{}) {
+		return nil, fmt.Errorf("IndexStore.Get(%s): %w", fn, err)
+	}
+
+	ix := index.New(ixs)
+	b.indexes[fn] = ix
+	return ix, nil
+}
+
+// Scan reads from the given sstable reader until it finds a record with the
+// given key. If EOF is reached, nil is returned. For efficiency, the reader
+// should already be *near* the record by using an index.
+func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (*types.Record, int, error) {
+	var rec *types.Record
+	var scanned int
+	var err error
+
+	for {
+		rec, err = reader.Next()
+		if err != nil {
+			return nil, scanned, fmt.Errorf("sstable.Reader.Next: %w", err)
+		}
+		if rec == nil {
+			// end of file
+			return nil, scanned, nil
+		}
+
+		scanned++
+
+		if rec.Key == key {
+			break
+		}
+	}
+
+	return rec, scanned, nil
 }
 
 type FlushStats struct {
@@ -158,10 +293,11 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 
 	var dest string
 	var meta *sstable.Meta
+	var idx []api.IndexEntry
 
 	g.Go(func() error {
 		var err error
-		dest, _, meta, err = b.bs.Flush(ctx2, ch)
+		dest, _, meta, idx, err = b.bs.Flush(ctx2, ch, b.fopts...)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}
@@ -173,14 +309,19 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 		return stats, err
 	}
 
-	// wait until the sstable is actually readable to update the stats.
-
 	err = b.md.Insert(ctx, meta)
 	if err != nil {
 		// TODO: maybe delete the sstable(s) here, since they're orphaned.
 		return stats, fmt.Errorf("metadata.Insert: %w", err)
 	}
 
+	err = b.ixs.Put(ctx, meta.Filename(), idx)
+	if err != nil {
+		// TODO: roll back metadata insert
+		return stats, fmt.Errorf("IndexStore.Put: %w", err)
+	}
+
+	// wait until the sstable is actually readable to update the stats.
 	stats.FlushedMemtable = hPrev.Name()
 	stats.BlobName = dest
 	stats.Meta = meta

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	testsst "github.com/adammck/blobby/pkg/sstable/testutil"
 	"github.com/adammck/blobby/pkg/testdeps"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
@@ -30,8 +31,9 @@ func TestFlushEmpty(t *testing.T) {
 	ch := make(chan *types.Record)
 	close(ch)
 
-	_, _, _, err := bs.Flush(ctx, ch)
+	_, _, _, _, err := bs.Flush(ctx, ch)
 	assert.ErrorIs(t, err, ErrNoRecords)
+	//assert.Len(t, idx.Contents, 0)
 }
 
 func TestFlush(t *testing.T) {
@@ -52,32 +54,31 @@ func TestFlush(t *testing.T) {
 		close(ch)
 	}()
 
-	_, n, meta, err := bs.Flush(ctx, ch)
+	_, n, meta, idx, err := bs.Flush(ctx, ch)
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
 	assert.Equal(t, "test1", meta.MinKey)
 	assert.Equal(t, "test2", meta.MaxKey)
 
-	rec1, _, err := bs.Find(ctx, meta.Filename(), "test1")
-	require.NoError(t, err)
-	assert.NotNil(t, rec1)
-	assert.Equal(t, "test1", rec1.Key)
-	assert.Equal(t, []byte("doc1"), rec1.Document)
+	// check that an index was written. the contents don't matter.
+	assert.Greater(t, len(idx), 0)
 
-	rec2, _, err := bs.Find(ctx, meta.Filename(), "test2")
+	// both records were written.
+	sst, err := bs.GetFull(ctx, meta.Filename())
 	require.NoError(t, err)
-	assert.NotNil(t, rec2)
-	assert.Equal(t, "test2", rec2.Key)
-	assert.Equal(t, []byte("doc2"), rec2.Document)
+	recs := testsst.Map(t, sst)
+	assert.Contains(t, recs, "test1")
+	assert.Contains(t, recs, "test2")
+	assert.Equal(t, []byte("doc1"), recs["test1"].Document)
+	assert.Equal(t, []byte("doc2"), recs["test2"].Document)
 
 	// unknown key
-	rec3, _, err := bs.Find(ctx, meta.Filename(), "test3")
-	require.NoError(t, err)
-	assert.Nil(t, rec3)
+	assert.NotContains(t, recs, "test3")
+	assert.Nil(t, recs["test3"])
 }
 
 func TestGetNonExistentFile(t *testing.T) {
 	ctx, _, bs, _ := setup(t)
-	_, _, err := bs.Find(ctx, "nonexistent.sstable", "test1")
+	_, err := bs.GetFull(ctx, "nonexistent.sstable")
 	assert.Error(t, err)
 }

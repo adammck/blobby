@@ -37,7 +37,7 @@ func main() {
 		log.Fatalf("Required: S3_BUCKET")
 	}
 
-	b := blobby.New(mongoURL, bucket, clockwork.NewRealClock())
+	b := blobby.New(ctx, mongoURL, bucket, clockwork.NewRealClock())
 
 	err := b.Ping(ctx)
 	if err != nil {
