@@ -10,6 +10,7 @@ import (
 	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/adammck/blobby/pkg/compactor"
 	mindexstore "github.com/adammck/blobby/pkg/impl/indexstore/mongo"
+	"github.com/adammck/blobby/pkg/index"
 	"github.com/adammck/blobby/pkg/memtable"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
@@ -150,27 +151,17 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetS
 			}
 		}
 
-		var r *sstable.Reader
-		var first, last int64
+		indexer := index.New(ixs)
+		rng, err := indexer.Lookup(key)
 
-		// find the byte range we need to look at for this key.
-		// TODO: extract this into a func so we can test it.
-		// TODO: cache the index in-process; it's immutable.
-		// TODO: materialize the index, so we can use binary search.
-		for i := range ixs {
-			if ixs[i].Key < key {
-				first = ixs[i].Offset
-			}
-			if ixs[i].Key > key {
-				// Offset is the first byte of the next segment, and byte range
-				// fetch is inclusive, so stop before it.
-				last = ixs[i].Offset - 1
-				break
-			}
+		// TODO: this doesn't need to be fatal. we can read the whole sstable.
+		if err != nil {
+			return nil, stats, fmt.Errorf("Indexer.Lookup(%s): %w", key, err)
 		}
 
-		if first > 0 {
-			r, err = b.bs.GetPartial(ctx, meta.Filename(), first, last)
+		var r *sstable.Reader
+		if rng != nil {
+			r, err = b.bs.GetPartial(ctx, meta.Filename(), rng.First, rng.Last)
 			if err != nil {
 				return nil, stats, fmt.Errorf("blobstore.GetPartial: %w", err)
 			}
