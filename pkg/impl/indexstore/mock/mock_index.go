@@ -7,21 +7,21 @@ import (
 )
 
 type MockIndexStore struct {
-	Contents map[string]api.Index
+	Contents map[string][]api.IndexEntry
 }
 
 func New() *MockIndexStore {
 	return &MockIndexStore{
-		Contents: make(map[string]api.Index),
+		Contents: make(map[string][]api.IndexEntry),
 	}
 }
 
-func (m *MockIndexStore) Put(ctx context.Context, filename string, entries api.Index) error {
+func (m *MockIndexStore) Put(ctx context.Context, filename string, entries []api.IndexEntry) error {
 	m.Contents[filename] = entries
 	return nil
 }
 
-func (m *MockIndexStore) Get(ctx context.Context, filename string) (api.Index, error) {
+func (m *MockIndexStore) Get(ctx context.Context, filename string) ([]api.IndexEntry, error) {
 	entries, ok := m.Contents[filename]
 	if !ok {
 		return nil, &api.IndexNotFound{Filename: filename}

@@ -112,7 +112,7 @@ func (bs *Blobstore) Init(ctx context.Context) error {
 }
 
 // TODO: remove most of the return values; meta contains everything.
-func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record, opts ...sstable.WriterOption) (dest string, count int, meta *sstable.Meta, index api.Index, err error) {
+func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record, opts ...sstable.WriterOption) (dest string, count int, meta *sstable.Meta, index []api.IndexEntry, err error) {
 	f, err := os.CreateTemp("", "sstable-*")
 	if err != nil {
 		return "", 0, nil, nil, fmt.Errorf("CreateTemp: %w", err)

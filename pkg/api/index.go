@@ -11,18 +11,15 @@ type IndexEntry struct {
 	Offset int64
 }
 
-// Index is a slice of IndexEntry. Each sstable should have one of these.
-type Index []IndexEntry
-
 type IndexStore interface {
 
 	// Put stores the index for the given sstable filename.
 	// If the index already exists, it will be overwritten.
-	Put(ctx context.Context, filename string, entries Index) error
+	Put(ctx context.Context, filename string, entries []IndexEntry) error
 
 	// Get retrieves the index for the given sstable filename.
 	// If the index does not exist, IndexNotFound is returned.
-	Get(ctx context.Context, filename string) (Index, error)
+	Get(ctx context.Context, filename string) ([]IndexEntry, error)
 
 	// Delete deletes the index for the given sstable filename.
 	// If the index does not exist, the call is a no-op.

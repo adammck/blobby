@@ -63,8 +63,8 @@ func (w *Writer) Add(record *types.Record) error {
 }
 
 // Write writes the SSTable to the given writer, and returns the corresponding
-// index which should be persited somewhere via an IndexStore.
-func (w *Writer) Write(out io.Writer) (*Meta, api.Index, error) {
+// index entries which should be persited somewhere via an IndexStore.
+func (w *Writer) Write(out io.Writer) (*Meta, []api.IndexEntry, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -95,7 +95,7 @@ func (w *Writer) Write(out io.Writer) (*Meta, api.Index, error) {
 	idxRecs := 0
 	idxBytes := 0
 
-	var idx api.Index
+	var idx []api.IndexEntry
 	for i, record := range w.records {
 		if i == 0 || w.shouldCreateIndex(idxRecs, idxBytes) {
 			idx = append(idx, api.IndexEntry{

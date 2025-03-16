@@ -15,7 +15,7 @@ type Indexer struct {
 	entries []api.IndexEntry
 }
 
-func New(idx api.Index) *Indexer {
+func New(idx []api.IndexEntry) *Indexer {
 	if len(idx) == 0 {
 		return &Indexer{entries: []api.IndexEntry{}}
 	}

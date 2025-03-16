@@ -96,7 +96,7 @@ func TestWriteWithIndexByteFreq(t *testing.T) {
 	// 256 bytes per segment, 77 bytes per record -> 4 records per segment. the
 	// index entry appears before the *next* record, so the size of each segment
 	// will actually be slightly more than 256.
-	require.Equal(t, api.Index{
+	require.Equal(t, []api.IndexEntry{
 		{Key: "k101", Offset: int64(len(magicBytes))},
 		{Key: "k105", Offset: int64(len(magicBytes) + (recSize * 4))},
 		{Key: "k109", Offset: int64(len(magicBytes) + (recSize * 8))},

@@ -8,7 +8,7 @@ import (
 )
 
 func TestIndexer(t *testing.T) {
-	idx := api.Index{
+	idx := []api.IndexEntry{
 		{Key: "apple", Offset: 100},
 		{Key: "banana", Offset: 200},
 		{Key: "cherry", Offset: 300},
@@ -64,13 +64,13 @@ func TestIndexer(t *testing.T) {
 }
 
 func TestEmptyIndex(t *testing.T) {
-	indexer := New(api.Index{})
+	indexer := New([]api.IndexEntry{})
 	result := indexer.Lookup("anything")
 	require.Equal(t, Range{First: 0, Last: -1}, result)
 }
 
 func TestUnsortedIndex(t *testing.T) {
-	idx := api.Index{
+	idx := []api.IndexEntry{
 		{Key: "date", Offset: 400},
 		{Key: "apple", Offset: 100},
 		{Key: "elderberry", Offset: 500},

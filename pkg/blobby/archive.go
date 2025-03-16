@@ -277,7 +277,7 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 
 	var dest string
 	var meta *sstable.Meta
-	var idx api.Index
+	var idx []api.IndexEntry
 
 	g.Go(func() error {
 		var err error

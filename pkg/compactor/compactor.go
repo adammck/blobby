@@ -172,7 +172,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 	})
 
 	var meta *sstable.Meta
-	var idx api.Index
+	var idx []api.IndexEntry
 
 	g.Go(func() error {
 		var err error
