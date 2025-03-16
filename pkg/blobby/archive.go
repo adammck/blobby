@@ -41,7 +41,7 @@ type Blobby struct {
 
 	// index cache
 	indexesMu sync.Mutex
-	indexes   map[string]*index.Indexer
+	indexes   map[string]*index.Index
 }
 
 func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *Blobby {
@@ -70,7 +70,7 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *B
 		comp:  compactor.New(clock, bs, md, ixs, fopts),
 		fopts: fopts,
 
-		indexes: map[string]*index.Indexer{},
+		indexes: map[string]*index.Index{},
 	}
 }
 
@@ -151,15 +151,15 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetS
 	for _, meta := range metas {
 
 		// fetch the index for this sstable. hopefully cached.
-		indexer, err := b.getIndexer(ctx, meta.Filename())
+		idx, err := b.getIndex(ctx, meta.Filename())
 		if err != nil {
-			return nil, stats, fmt.Errorf("getIndexer(%s): %w", key, err)
+			return nil, stats, fmt.Errorf("getIndex(%s): %w", key, err)
 		}
 
-		rng, err := indexer.Lookup(key)
+		rng, err := idx.Lookup(key)
 		if err != nil {
 			// TODO: this need not be fatal. we can read the whole sstable.
-			return nil, stats, fmt.Errorf("Indexer.Lookup(%s): %w", key, err)
+			return nil, stats, fmt.Errorf("Index.Lookup(%s): %w", key, err)
 		}
 
 		var r *sstable.Reader
@@ -204,11 +204,11 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetS
 	return nil, stats, nil
 }
 
-// getIndexer returns the indexer for the given sstable. If the indexer is not
-// already cached, it will be fetched from the index store and cached forever.
+// getIndex returns the index for the given sstable. If the index is not already
+// cached, it will be fetched from the index store and cached forever.
 //
 // TODO: add some kind of expiration policy.
-func (b *Blobby) getIndexer(ctx context.Context, fn string) (*index.Indexer, error) {
+func (b *Blobby) getIndex(ctx context.Context, fn string) (*index.Index, error) {
 	b.indexesMu.Lock()
 	defer b.indexesMu.Unlock()
 

@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIndexer(t *testing.T) {
-	indexer := New([]api.IndexEntry{
+func TestIndex(t *testing.T) {
+	index := New([]api.IndexEntry{
 		{Key: "apple", Offset: 100},
 		{Key: "banana", Offset: 200},
 		{Key: "cherry", Offset: 300},
@@ -70,7 +70,7 @@ func TestIndexer(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			rng, err := indexer.Lookup(tc.key)
+			rng, err := index.Lookup(tc.key)
 			if tc.expectError {
 				require.Error(t, err)
 			} else {
@@ -82,14 +82,14 @@ func TestIndexer(t *testing.T) {
 }
 
 func TestEmptyIndex(t *testing.T) {
-	indexer := New([]api.IndexEntry{})
-	rng, err := indexer.Lookup("anything")
+	index := New([]api.IndexEntry{})
+	rng, err := index.Lookup("anything")
 	require.NoError(t, err)
 	require.Nil(t, rng)
 }
 
 func TestUnsortedIndex(t *testing.T) {
-	indexer := New([]api.IndexEntry{
+	index := New([]api.IndexEntry{
 		{Key: "date", Offset: 400},
 		{Key: "apple", Offset: 100},
 		{Key: "elderberry", Offset: 500},
@@ -97,13 +97,13 @@ func TestUnsortedIndex(t *testing.T) {
 		{Key: "banana", Offset: 200},
 	})
 
-	rng, err := indexer.Lookup("cantaloupe")
+	rng, err := index.Lookup("cantaloupe")
 	require.NoError(t, err)
 	require.Equal(t, &Range{First: 200, Last: 299}, rng)
 }
 
 func TestDuplicateKeysStart(t *testing.T) {
-	indexer := New([]api.IndexEntry{
+	index := New([]api.IndexEntry{
 		{Key: "apple", Offset: 100},
 		{Key: "apple", Offset: 200},
 		{Key: "apple", Offset: 300},
@@ -111,7 +111,7 @@ func TestDuplicateKeysStart(t *testing.T) {
 		{Key: "cherry", Offset: 500},
 	})
 
-	rng, err := indexer.Lookup("apple")
+	rng, err := index.Lookup("apple")
 	require.NoError(t, err)
 	require.Equal(t, &Range{First: 100, Last: 399}, rng)
 }
@@ -125,14 +125,14 @@ func TestDuplicateKeysMid(t *testing.T) {
 		{Key: "cherry", Offset: 500},
 	}
 
-	indexer := New(idx)
-	rng, err := indexer.Lookup("banana")
+	index := New(idx)
+	rng, err := index.Lookup("banana")
 	require.NoError(t, err)
 	require.Equal(t, &Range{First: 100, Last: 499}, rng)
 }
 
 func TestDuplicateKeysEnd(t *testing.T) {
-	indexer := New([]api.IndexEntry{
+	index := New([]api.IndexEntry{
 		{Key: "apple", Offset: 100},
 		{Key: "banana", Offset: 200},
 		{Key: "cherry", Offset: 300},
@@ -140,13 +140,13 @@ func TestDuplicateKeysEnd(t *testing.T) {
 		{Key: "cherry", Offset: 500},
 	})
 
-	rng, err := indexer.Lookup("cherry")
+	rng, err := index.Lookup("cherry")
 	require.NoError(t, err)
 	require.Equal(t, &Range{First: 200, Last: 0}, rng)
 }
 
 func TestDuplicateKeysAll(t *testing.T) {
-	indexer := New([]api.IndexEntry{
+	index := New([]api.IndexEntry{
 		{Key: "apple", Offset: 100},
 		{Key: "apple", Offset: 200},
 		{Key: "apple", Offset: 300},
@@ -154,7 +154,7 @@ func TestDuplicateKeysAll(t *testing.T) {
 		{Key: "apple", Offset: 500},
 	})
 
-	rng, err := indexer.Lookup("apple")
+	rng, err := index.Lookup("apple")
 	require.NoError(t, err)
 	require.Equal(t, &Range{First: 100, Last: 0}, rng)
 }

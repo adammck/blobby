@@ -12,13 +12,13 @@ type Range struct {
 	Last  int64
 }
 
-type Indexer struct {
+type Index struct {
 	entries []api.IndexEntry
 }
 
-func New(idx []api.IndexEntry) *Indexer {
+func New(idx []api.IndexEntry) *Index {
 	if len(idx) == 0 {
-		return &Indexer{entries: []api.IndexEntry{}}
+		return &Index{entries: []api.IndexEntry{}}
 	}
 
 	entries := make([]api.IndexEntry, len(idx))
@@ -29,10 +29,10 @@ func New(idx []api.IndexEntry) *Indexer {
 		return entries[i].Key < entries[j].Key
 	})
 
-	return &Indexer{entries: entries}
+	return &Index{entries: entries}
 }
 
-func (idx *Indexer) Lookup(key string) (*Range, error) {
+func (idx *Index) Lookup(key string) (*Range, error) {
 	if len(idx.entries) == 0 {
 		return nil, nil
 	}
