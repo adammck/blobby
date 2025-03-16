@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
@@ -37,6 +38,10 @@ type Blobby struct {
 
 	// Options for the SSTable writer.
 	fopts []sstable.WriterOption
+
+	// index cache
+	indexesMu sync.Mutex
+	indexes   map[string]*index.Indexer
 }
 
 func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *Blobby {
@@ -64,6 +69,8 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *B
 		clock: clock,
 		comp:  compactor.New(clock, bs, md, ixs, fopts),
 		fopts: fopts,
+
+		indexes: map[string]*index.Indexer{},
 	}
 }
 
@@ -143,19 +150,15 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetS
 	// note: this assumes that metas is already sorted.
 	for _, meta := range metas {
 
-		// fetch the index for this sstable.
-		ixs, err := b.ixs.Get(ctx, meta.Filename())
+		// fetch the index for this sstable. hopefully cached.
+		indexer, err := b.getIndexer(ctx, meta.Filename())
 		if err != nil {
-			if !errors.Is(err, &api.IndexNotFound{}) {
-				return nil, stats, fmt.Errorf("IndexStore.Get(%s): %w", meta.Filename(), err)
-			}
+			return nil, stats, fmt.Errorf("getIndexer(%s): %w", key, err)
 		}
 
-		indexer := index.New(ixs)
 		rng, err := indexer.Lookup(key)
-
-		// TODO: this doesn't need to be fatal. we can read the whole sstable.
 		if err != nil {
+			// TODO: this need not be fatal. we can read the whole sstable.
 			return nil, stats, fmt.Errorf("Indexer.Lookup(%s): %w", key, err)
 		}
 
@@ -199,6 +202,28 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetS
 
 	// key not found
 	return nil, stats, nil
+}
+
+// getIndexer returns the indexer for the given sstable. If the indexer is not
+// already cached, it will be fetched from the index store and cached forever.
+//
+// TODO: add some kind of expiration policy.
+func (b *Blobby) getIndexer(ctx context.Context, fn string) (*index.Indexer, error) {
+	b.indexesMu.Lock()
+	defer b.indexesMu.Unlock()
+
+	if ix, ok := b.indexes[fn]; ok {
+		return ix, nil
+	}
+
+	ixs, err := b.ixs.Get(ctx, fn)
+	if err != nil && !errors.Is(err, &api.IndexNotFound{}) {
+		return nil, fmt.Errorf("IndexStore.Get(%s): %w", fn, err)
+	}
+
+	ix := index.New(ixs)
+	b.indexes[fn] = ix
+	return ix, nil
 }
 
 // Scan reads from the given sstable reader until it finds a record with the
