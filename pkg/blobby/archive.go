@@ -9,7 +9,7 @@ import (
 	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/adammck/blobby/pkg/compactor"
-	mongoindex "github.com/adammck/blobby/pkg/impl/index/mongo"
+	mindexstore "github.com/adammck/blobby/pkg/impl/indexstore/mongo"
 	"github.com/adammck/blobby/pkg/memtable"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
@@ -45,7 +45,7 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *B
 		panic(fmt.Errorf("connectToMongo: %w", err))
 	}
 
-	ixs := mongoindex.New(db)
+	ixs := mindexstore.New(db)
 	bs := blobstore.New(bucket, clock)
 	md := metadata.New(mongoURL)
 
