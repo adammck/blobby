@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/jonboulle/clockwork"
@@ -15,6 +16,8 @@ import (
 )
 
 var (
+	seed = flag.Int("seed", 0, "random seed; default is current time")
+
 	initCount = flag.Int("initcount", 1000, "number of keys to create initially")
 	numOps    = flag.Int("numops", 3000, "number of operations to perform")
 
@@ -39,6 +42,7 @@ func TestMain(m *testing.M) {
 
 // see flags above for docs.
 type chaosTestConfig struct {
+	seed      int
 	initCount int
 	numOps    int
 	pGet      int
@@ -55,6 +59,7 @@ type chaosTestConfig struct {
 
 func configFromFlags() chaosTestConfig {
 	return chaosTestConfig{
+		seed:      *seed,
 		initCount: *initCount,
 		numOps:    *numOps,
 		pGet:      *pGet,
@@ -84,6 +89,8 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 		values: make(map[string][]byte),
 	}
 
+	rnd := getRand(t, int64(cfg.seed))
+
 	t.Log("Creating initial dataset...")
 	for i := range cfg.initCount {
 		key := fmt.Sprintf("key-%04d", i)
@@ -94,17 +101,17 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 
 	t.Logf("Spamming %d random ops....", cfg.numOps)
 	totalOps := cfg.pGet + cfg.pPut + cfg.pFlush + cfg.pCompact
-	for range cfg.numOps {
+	for i := range cfg.numOps {
 		var op operation
-		p := rand.Intn(totalOps)
+		p := rnd.Intn(totalOps)
 
 		switch {
 		case p < cfg.pGet:
-			op = getOp{key: selectKey(cfg)}
+			op = getOp{key: selectKey(cfg, rnd)}
 
 		case p < cfg.pGet+cfg.pPut:
-			key := selectKey(cfg)
-			val := fmt.Appendf(nil, "value-%s-v%d", key, rand.Int())
+			key := selectKey(cfg, rnd)
+			val := fmt.Appendf(nil, "value-%s-v%05d-r%d", key, i, rnd.Int())
 			op = putOp{key: key, value: val}
 
 		case p < cfg.pGet+cfg.pPut+cfg.pFlush:
@@ -168,17 +175,17 @@ func (s *testStats) meanRecordsScanned() float64 {
 	return float64(s.totalRecordsScanned) / float64(s.numGets)
 }
 
-func selectKey(cfg chaosTestConfig) string {
-	p := rand.Intn(cfg.pHot + cfg.pWarm + cfg.pCold)
+func selectKey(cfg chaosTestConfig, rng *rand.Rand) string {
+	p := rng.Intn(cfg.pHot + cfg.pWarm + cfg.pCold)
 	switch {
 	case p < cfg.pHot:
-		return fmt.Sprintf("key-%04d", rand.Intn(cfg.nHot))
+		return fmt.Sprintf("key-%04d", rng.Intn(cfg.nHot))
 
 	case p < cfg.pHot+cfg.pWarm:
-		return fmt.Sprintf("key-%04d", rand.Intn(cfg.nWarm)+cfg.nHot)
+		return fmt.Sprintf("key-%04d", rng.Intn(cfg.nWarm)+cfg.nHot)
 
 	default:
-		return fmt.Sprintf("key-%04d", rand.Intn(cfg.nCold)+cfg.nHot+cfg.nWarm)
+		return fmt.Sprintf("key-%04d", rng.Intn(cfg.nCold)+cfg.nHot+cfg.nWarm)
 	}
 }
 
@@ -275,4 +282,15 @@ func (o compactOp) run(t *testing.T, ctx context.Context, b *Blobby, state *test
 			len(stats[0].Inputs), len(stats[0].Outputs))
 	}
 	return nil
+}
+
+// getRand returns a random number generator seeded with the given seed, unless
+// the seed is 0, in which case it uses the current time.
+func getRand(t *testing.T, seed int64) *rand.Rand {
+	if seed == 0 {
+		seed = time.Now().UnixNano()
+	}
+
+	t.Logf("random seed: %d", seed)
+	return rand.New(rand.NewSource(seed))
 }
