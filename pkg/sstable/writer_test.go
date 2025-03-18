@@ -32,7 +32,7 @@ func TestWriteRecords(t *testing.T) {
 	_ = w.Add(&types.Record{Key: "key2", Timestamp: ts2, Document: []byte("doc2")})
 
 	var buf bytes.Buffer
-	meta, _, err := w.Write(&buf)
+	meta, _, _, err := w.Write(&buf)
 	require.NoError(t, err)
 	assert.Equal(t, 2, meta.Count)
 	assert.Equal(t, "key1", meta.MinKey)
@@ -61,7 +61,7 @@ func TestWriteWithIndex(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	_, idx, err := w.Write(&buf)
+	_, idx, _, err := w.Write(&buf)
 	require.NoError(t, err)
 	require.Len(t, idx, 3)
 	require.Equal(t, "key1", idx[0].Key)
@@ -86,7 +86,7 @@ func TestWriteWithIndexByteFreq(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	meta, idx, err := w.Write(&buf)
+	meta, idx, _, err := w.Write(&buf)
 	require.NoError(t, err)
 
 	// if these fail, the test is broken, maybe not the implementation.
@@ -115,7 +115,7 @@ func TestWriteRecordsReverseTimes(t *testing.T) {
 	_ = w.Add(&types.Record{Key: "key2", Timestamp: ts1, Document: []byte("doc2")})
 
 	var buf bytes.Buffer
-	meta, _, err := w.Write(&buf)
+	meta, _, _, err := w.Write(&buf)
 	require.NoError(t, err)
 	assert.Equal(t, ts1, meta.MinTime)
 	assert.Equal(t, ts2, meta.MaxTime)
@@ -127,7 +127,7 @@ func TestWriteTimestampsWithSingleRecord(t *testing.T) {
 	_ = w.Add(&types.Record{Key: "key1", Timestamp: ts, Document: []byte("doc1")})
 
 	var buf bytes.Buffer
-	meta, _, err := w.Write(&buf)
+	meta, _, _, err := w.Write(&buf)
 	require.NoError(t, err)
 	assert.Equal(t, ts, meta.MinTime)
 	assert.Equal(t, ts, meta.MaxTime)
@@ -155,7 +155,7 @@ func TestWriteError(t *testing.T) {
 	w.Add(&types.Record{Key: "key1", Timestamp: c.Now(), Document: []byte("doc1")})
 
 	fw := &writeFailer{}
-	_, _, err := w.Write(fw)
+	_, _, _, err := w.Write(fw)
 	assert.Error(t, err)
 }
 
@@ -175,7 +175,7 @@ func TestWriteOrder(t *testing.T) {
 	w.Add(&types.Record{Key: "key1", Timestamp: ts1, Document: []byte("k1t1")})
 
 	var buf bytes.Buffer
-	_, _, err := w.Write(&buf)
+	_, _, _, err := w.Write(&buf)
 	require.NoError(t, err)
 
 	r, err := NewReader(io.NopCloser(&buf))

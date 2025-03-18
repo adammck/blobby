@@ -51,7 +51,9 @@ func TestFilterCache(t *testing.T) {
 
 	// Create test data
 	keys := []string{"key1", "key2", "key3"}
-	info, err := xor.Create(keys)
+	f, err := xor.Create(keys)
+	require.NoError(t, err)
+	info, err := f.Marshal()
 	require.NoError(t, err)
 
 	// Test Put
@@ -114,7 +116,9 @@ func TestCacheConcurrent(t *testing.T) {
 
 	// Create some test data
 	keys := []string{"key1", "key2", "key3"}
-	info, err := xor.Create(keys)
+	f, err := xor.Create(keys)
+	require.NoError(t, err)
+	info, err := f.Marshal()
 	require.NoError(t, err)
 
 	err = cache.Put(ctx, "file.sst", info)

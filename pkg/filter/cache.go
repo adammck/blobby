@@ -11,10 +11,6 @@ import (
 	"github.com/adammck/blobby/pkg/filter/xor"
 )
 
-type Filter interface {
-	Contains(key string) bool
-}
-
 func newFilterFromInfo(info api.FilterInfo) (Filter, error) {
 	switch info.Type {
 	case xor.FilterType:

@@ -11,20 +11,20 @@ import (
 )
 
 const (
-	FilterType      = "xor"
-	FilterVersionV1 = "v1"
-	headerSize      = 8 + 4*4 // uint64 + 4*uint32
+	FilterType    = "xor"
+	FilterVersion = "v1"
+	headerSize    = 8 + 4*4 // uint64 + 4*uint32
 )
 
 type Filter struct {
-	xf xorfilter.BinaryFuse8
+	xf *xorfilter.BinaryFuse8
 }
 
 func New(f api.FilterInfo) (*Filter, error) {
 	if f.Type != FilterType {
 		return nil, fmt.Errorf("bad type: %s", f.Type)
 	}
-	if f.Version != FilterVersionV1 {
+	if f.Version != FilterVersion {
 		return nil, fmt.Errorf("bad version: %s", f.Version)
 	}
 	if len(f.Data) == 0 {
@@ -36,16 +36,12 @@ func New(f api.FilterInfo) (*Filter, error) {
 		return nil, err
 	}
 
-	return &Filter{xf: xf}, nil
+	return &Filter{xf: &xf}, nil
 }
 
-func (f *Filter) Contains(key string) bool {
-	return f.xf.Contains(hashKey(key))
-}
-
-func Create(keys []string) (api.FilterInfo, error) {
+func Create(keys []string) (*Filter, error) {
 	if len(keys) == 0 {
-		return api.FilterInfo{}, errors.New("empty key set")
+		return nil, errors.New("empty key set")
 	}
 
 	hashes := make([]uint64, len(keys))
@@ -55,17 +51,25 @@ func Create(keys []string) (api.FilterInfo, error) {
 
 	filter, err := xorfilter.PopulateBinaryFuse8(hashes)
 	if err != nil {
-		return api.FilterInfo{}, fmt.Errorf("PopulateBinaryFuse8: %w", err)
+		return nil, fmt.Errorf("PopulateBinaryFuse8: %w", err)
 	}
 
-	data, err := marshal(filter)
+	return &Filter{xf: filter}, nil
+}
+
+func (f *Filter) Contains(key string) bool {
+	return f.xf.Contains(hashKey(key))
+}
+
+func (f *Filter) Marshal() (api.FilterInfo, error) {
+	data, err := marshal(f.xf)
 	if err != nil {
 		return api.FilterInfo{}, err
 	}
 
 	return api.FilterInfo{
 		Type:    FilterType,
-		Version: FilterVersionV1,
+		Version: FilterVersion,
 		Data:    data,
 	}, nil
 }

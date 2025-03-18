@@ -10,6 +10,8 @@ import (
 	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/adammck/blobby/pkg/compactor"
+	"github.com/adammck/blobby/pkg/filter"
+	mfilterstore "github.com/adammck/blobby/pkg/impl/filterstore/mongo"
 	mindexstore "github.com/adammck/blobby/pkg/impl/indexstore/mongo"
 	"github.com/adammck/blobby/pkg/index"
 	"github.com/adammck/blobby/pkg/memtable"
@@ -33,6 +35,7 @@ type Blobby struct {
 	bs    *blobstore.Blobstore
 	md    *metadata.Store
 	ixs   api.IndexStore
+	fs    api.FilterStore
 	clock clockwork.Clock
 	comp  *compactor.Compactor
 
@@ -52,6 +55,7 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *B
 	}
 
 	ixs := mindexstore.New(db)
+	fs := mfilterstore.New(db)
 	bs := blobstore.New(bucket, clock)
 	md := metadata.New(mongoURL)
 
@@ -66,8 +70,9 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *B
 		bs:    bs,
 		md:    md,
 		ixs:   ixs,
+		fs:    fs,
 		clock: clock,
-		comp:  compactor.New(clock, bs, md, ixs, fopts),
+		comp:  compactor.New(clock, bs, md, ixs, fs, fopts),
 		fopts: fopts,
 
 		indexes: map[string]*index.Index{},
@@ -294,10 +299,11 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 	var dest string
 	var meta *sstable.Meta
 	var idx []api.IndexEntry
+	var f filter.Filter
 
 	g.Go(func() error {
 		var err error
-		dest, _, meta, idx, err = b.bs.Flush(ctx2, ch, b.fopts...)
+		dest, _, meta, idx, f, err = b.bs.Flush(ctx2, ch, b.fopts...)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}
@@ -319,6 +325,20 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 	if err != nil {
 		// TODO: roll back metadata insert
 		return stats, fmt.Errorf("IndexStore.Put: %w", err)
+	}
+
+	// marshal the filter here. not sure why!
+	fi, err := f.Marshal()
+	if err != nil {
+		// TODO: roll back everything, or maybe do this above.
+		return stats, fmt.Errorf("Filter.Marshal: %w", err)
+	}
+
+	// write the filter using a filterstore
+	err = b.fs.Put(ctx, meta.Filename(), fi)
+	if err != nil {
+		// TODO: roll back metadata insert
+		return stats, fmt.Errorf("FilterStore.Put: %w", err)
 	}
 
 	// wait until the sstable is actually readable to update the stats.

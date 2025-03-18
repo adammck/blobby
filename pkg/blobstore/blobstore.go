@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/adammck/blobby/pkg/api"
+	"github.com/adammck/blobby/pkg/filter"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -112,10 +113,10 @@ func (bs *Blobstore) Init(ctx context.Context) error {
 }
 
 // TODO: remove most of the return values; meta contains everything.
-func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record, opts ...sstable.WriterOption) (dest string, count int, meta *sstable.Meta, index []api.IndexEntry, err error) {
+func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record, opts ...sstable.WriterOption) (dest string, count int, meta *sstable.Meta, index []api.IndexEntry, filter filter.Filter, err error) {
 	f, err := os.CreateTemp("", "sstable-*")
 	if err != nil {
-		return "", 0, nil, nil, fmt.Errorf("CreateTemp: %w", err)
+		return "", 0, nil, nil, nil, fmt.Errorf("CreateTemp: %w", err)
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
@@ -126,29 +127,29 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record, opts ...s
 	for rec := range ch {
 		err = w.Add(rec)
 		if err != nil {
-			return "", 0, nil, nil, fmt.Errorf("Write: %w", err)
+			return "", 0, nil, nil, nil, fmt.Errorf("Write: %w", err)
 		}
 		n++
 	}
 
 	// nothing to write
 	if n == 0 {
-		return "", 0, nil, nil, ErrNoRecords
+		return "", 0, nil, nil, nil, ErrNoRecords
 	}
 
-	meta, index, err = w.Write(f)
+	meta, index, filter, err = w.Write(f)
 	if err != nil {
-		return "", 0, nil, nil, fmt.Errorf("sstable.Write: %w", err)
+		return "", 0, nil, nil, nil, fmt.Errorf("sstable.Write: %w", err)
 	}
 
 	_, err = f.Seek(0, 0)
 	if err != nil {
-		return "", 0, nil, nil, fmt.Errorf("Seek: %w", err)
+		return "", 0, nil, nil, nil, fmt.Errorf("Seek: %w", err)
 	}
 
 	s3c, err := bs.getS3(ctx)
 	if err != nil {
-		return "", 0, nil, nil, fmt.Errorf("getS3: %w", err)
+		return "", 0, nil, nil, nil, fmt.Errorf("getS3: %w", err)
 	}
 
 	key := meta.Filename()
@@ -161,10 +162,10 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record, opts ...s
 		IfNoneMatch: aws.String("*"),
 	})
 	if err != nil {
-		return "", 0, nil, nil, fmt.Errorf("PutObject: %w", err)
+		return "", 0, nil, nil, nil, fmt.Errorf("PutObject: %w", err)
 	}
 
-	return key, n, meta, index, nil
+	return key, n, meta, index, filter, nil
 }
 
 func (bs *Blobstore) getS3(ctx context.Context) (*s3.Client, error) {

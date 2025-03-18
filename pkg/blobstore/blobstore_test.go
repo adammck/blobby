@@ -31,7 +31,7 @@ func TestFlushEmpty(t *testing.T) {
 	ch := make(chan *types.Record)
 	close(ch)
 
-	_, _, _, _, err := bs.Flush(ctx, ch)
+	_, _, _, _, _, err := bs.Flush(ctx, ch)
 	assert.ErrorIs(t, err, ErrNoRecords)
 	//assert.Len(t, idx.Contents, 0)
 }
@@ -54,7 +54,7 @@ func TestFlush(t *testing.T) {
 		close(ch)
 	}()
 
-	_, n, meta, idx, err := bs.Flush(ctx, ch)
+	_, n, meta, idx, _, err := bs.Flush(ctx, ch)
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
 	assert.Equal(t, "test1", meta.MinKey)

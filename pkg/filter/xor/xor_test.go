@@ -18,14 +18,15 @@ func TestXorFilterBasics(t *testing.T) {
 	}
 
 	// Create a filter from those keys
-	info, err := Create(keys)
+	f, err := Create(keys)
+	require.NoError(t, err)
+	info, err := f.Marshal()
+	require.NoError(t, err)
+
 	require.NoError(t, err)
 	require.Equal(t, FilterType, info.Type)
-	require.Equal(t, FilterVersionV1, info.Version)
+	require.Equal(t, FilterVersion, info.Version)
 	require.NotEmpty(t, info.Data)
-
-	f, err := New(info)
-	require.NoError(t, err)
 
 	// All inserted keys should be found (no false negatives)
 	for i, key := range keys {
@@ -60,7 +61,7 @@ func TestXorFilterErrors(t *testing.T) {
 	// Test with invalid filter type
 	invalidTypeFilter := api.FilterInfo{
 		Type:    "invalid",
-		Version: FilterVersionV1,
+		Version: FilterVersion,
 		Data:    []byte{1, 2, 3},
 	}
 	_, err = New(invalidTypeFilter)
@@ -78,7 +79,7 @@ func TestXorFilterErrors(t *testing.T) {
 	// Test with empty filter data
 	emptyDataFilter := api.FilterInfo{
 		Type:    FilterType,
-		Version: FilterVersionV1,
+		Version: FilterVersion,
 		Data:    nil,
 	}
 	_, err = New(emptyDataFilter)
@@ -87,7 +88,7 @@ func TestXorFilterErrors(t *testing.T) {
 	// Test with corrupted filter data
 	corruptedDataFilter := api.FilterInfo{
 		Type:    FilterType,
-		Version: FilterVersionV1,
+		Version: FilterVersion,
 		Data:    []byte{1, 2, 3}, // Not a valid serialized filter
 	}
 	_, err = New(corruptedDataFilter)
@@ -110,10 +111,10 @@ func BenchmarkXorFilterSize(b *testing.B) {
 				}
 				b.StartTimer()
 
-				info, err := Create(keys)
-				if err != nil {
-					b.Fatalf("Failed to create filter: %v", err)
-				}
+				f, err := Create(keys)
+				require.NoError(b, err)
+				info, err := f.Marshal()
+				require.NoError(b, err)
 
 				bitsPerKey := float64(len(info.Data)*8) / float64(count)
 				b.ReportMetric(bitsPerKey, "bits/key")
@@ -136,15 +137,8 @@ func BenchmarkXorFilterContains(b *testing.B) {
 		keys[i] = fmt.Sprintf("key-%d", i)
 	}
 
-	info, err := Create(keys)
-	if err != nil {
-		b.Fatalf("Failed to create filter: %v", err)
-	}
-
-	f, err := New(info)
-	if err != nil {
-		b.Fatalf("Failed to create filter: %v", err)
-	}
+	f, err := Create(keys)
+	require.NoError(b, err)
 
 	// Benchmark lookup for keys in the set
 	b.Run("KeysInSet", func(b *testing.B) {

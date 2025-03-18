@@ -5,6 +5,10 @@ import (
 	"fmt"
 )
 
+type FilterCreator interface {
+	Create(keys []string) (FilterInfo, error)
+}
+
 // FilterInfo encapsulates a filter with its type information
 type FilterInfo struct {
 	// Type identifies the filter algorithm (e.g., "xor", "ribbon", "bloom")
