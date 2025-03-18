@@ -25,14 +25,6 @@ func New(db *mongo.Database) *FilterStore {
 	}
 }
 
-func (s *FilterStore) Init(ctx context.Context) error {
-	err := s.db.CreateCollection(ctx, collection)
-	if err != nil {
-		return fmt.Errorf("CreateCollection: %w", err)
-	}
-	return nil
-}
-
 func (s *FilterStore) Put(ctx context.Context, filename string, filter api.FilterInfo) error {
 	opts := options.Update().SetUpsert(true)
 	_, err := s.db.Collection(collection).UpdateOne(

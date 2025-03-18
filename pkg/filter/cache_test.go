@@ -19,8 +19,6 @@ func newMockStore() *mockStore {
 	return &mockStore{store: make(map[string]api.FilterInfo)}
 }
 
-func (m *mockStore) Init(ctx context.Context) error { return nil }
-
 func (m *mockStore) Put(ctx context.Context, filename string, f api.FilterInfo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

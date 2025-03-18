@@ -19,9 +19,6 @@ type FilterInfo struct {
 
 // FilterStore defines the interface for storing/retrieving filters
 type FilterStore interface {
-	// Init initializes the filter store
-	Init(ctx context.Context) error
-
 	// Put stores a filter for the given sstable filename
 	Put(ctx context.Context, filename string, filter FilterInfo) error
 
