@@ -10,6 +10,7 @@ import (
 )
 
 type cacheEntry struct {
+	filter *Filter
 	info   api.FilterInfo
 	expiry time.Time
 }
@@ -47,7 +48,12 @@ func (c *FilterCache) Get(ctx context.Context, filename string) (api.FilterInfo,
 	atomic.AddInt64(&c.missCount, 1)
 
 	// Cache miss or expired, fetch from store
-	filter, err := c.store.Get(ctx, filename)
+	info, err := c.store.Get(ctx, filename)
+	if err != nil {
+		return api.FilterInfo{}, err
+	}
+
+	f, err := NewFilter(info)
 	if err != nil {
 		return api.FilterInfo{}, err
 	}
@@ -62,16 +68,22 @@ func (c *FilterCache) Get(ctx context.Context, filename string) (api.FilterInfo,
 	}
 
 	c.cache[filename] = cacheEntry{
-		info:   filter,
+		filter: f,
+		info:   info,
 		expiry: time.Now().Add(c.ttl),
 	}
 
-	return filter, nil
+	return info, nil
 }
 
 func (c *FilterCache) Put(ctx context.Context, filename string, filter api.FilterInfo) error {
 	// Update the store
 	if err := c.store.Put(ctx, filename, filter); err != nil {
+		return err
+	}
+
+	f, err := NewFilter(filter)
+	if err != nil {
 		return err
 	}
 
@@ -85,6 +97,7 @@ func (c *FilterCache) Put(ctx context.Context, filename string, filter api.Filte
 	}
 
 	c.cache[filename] = cacheEntry{
+		filter: f,
 		info:   filter,
 		expiry: time.Now().Add(c.ttl),
 	}
@@ -126,4 +139,21 @@ func (c *FilterCache) evict() {
 // Metrics returns cache hit/miss statistics
 func (c *FilterCache) Metrics() (hits, misses int64) {
 	return atomic.LoadInt64(&c.hitCount), atomic.LoadInt64(&c.missCount)
+}
+
+func (c *FilterCache) Contains(ctx context.Context, filename, key string) (bool, error) {
+	c.mu.RLock()
+	entry, ok := c.cache[filename]
+	c.mu.RUnlock()
+
+	if !ok || time.Now().After(entry.expiry) {
+		if _, err := c.Get(ctx, filename); err != nil {
+			return false, err
+		}
+		c.mu.RLock()
+		entry = c.cache[filename]
+		c.mu.RUnlock()
+	}
+
+	return entry.filter.Contains(key), nil
 }

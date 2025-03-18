@@ -1,4 +1,3 @@
-// pkg/filter/xor_test.go
 package filter
 
 import (
@@ -19,18 +18,19 @@ func TestXorFilterBasics(t *testing.T) {
 	}
 
 	// Create a filter from those keys
-	filter, err := NewXorFilter(keys)
+	info, err := Create(keys)
 	require.NoError(t, err)
-	require.Equal(t, FilterTypeXor, filter.Type)
-	require.Equal(t, FilterVersionXorV1, filter.Version)
-	require.NotEmpty(t, filter.Data)
+	require.Equal(t, FilterTypeXor, info.Type)
+	require.Equal(t, FilterVersionXorV1, info.Version)
+	require.NotEmpty(t, info.Data)
+
+	f, err := NewFilter(info)
+	require.NoError(t, err)
 
 	// All inserted keys should be found (no false negatives)
 	for i, key := range keys {
 		if i%1000 == 0 { // Test every 1000th key to keep test fast
-			contains, err := Contains(filter, key)
-			require.NoError(t, err)
-			require.True(t, contains, "Key should be in filter: %s", key)
+			require.True(t, f.Contains(key), "Key should be in filter: %s", key)
 		}
 	}
 
@@ -39,9 +39,7 @@ func TestXorFilterBasics(t *testing.T) {
 	testCount := 10000
 	for i := 0; i < testCount; i++ {
 		notInSetKey := fmt.Sprintf("other-key-%d", rand.Intn(1000000))
-		contains, err := Contains(filter, notInSetKey)
-		require.NoError(t, err)
-		if contains {
+		if f.Contains(notInSetKey) {
 			falsePositives++
 		}
 	}
@@ -56,7 +54,7 @@ func TestXorFilterBasics(t *testing.T) {
 
 func TestXorFilterErrors(t *testing.T) {
 	// Test with empty keys
-	_, err := NewXorFilter([]string{})
+	_, err := Create([]string{})
 	require.Error(t, err)
 
 	// Test with invalid filter type
@@ -65,7 +63,7 @@ func TestXorFilterErrors(t *testing.T) {
 		Version: FilterVersionXorV1,
 		Data:    []byte{1, 2, 3},
 	}
-	_, err = Contains(invalidTypeFilter, "key")
+	_, err = NewFilter(invalidTypeFilter)
 	require.Error(t, err)
 
 	// Test with invalid filter version
@@ -74,7 +72,7 @@ func TestXorFilterErrors(t *testing.T) {
 		Version: "invalid",
 		Data:    []byte{1, 2, 3},
 	}
-	_, err = Contains(invalidVersionFilter, "key")
+	_, err = NewFilter(invalidVersionFilter)
 	require.Error(t, err)
 
 	// Test with empty filter data
@@ -83,7 +81,7 @@ func TestXorFilterErrors(t *testing.T) {
 		Version: FilterVersionXorV1,
 		Data:    nil,
 	}
-	_, err = Contains(emptyDataFilter, "key")
+	_, err = NewFilter(emptyDataFilter)
 	require.Error(t, err)
 
 	// Test with corrupted filter data
@@ -92,7 +90,7 @@ func TestXorFilterErrors(t *testing.T) {
 		Version: FilterVersionXorV1,
 		Data:    []byte{1, 2, 3}, // Not a valid serialized filter
 	}
-	_, err = Contains(corruptedDataFilter, "key")
+	_, err = NewFilter(corruptedDataFilter)
 	require.Error(t, err)
 }
 
@@ -112,17 +110,17 @@ func BenchmarkXorFilterSize(b *testing.B) {
 				}
 				b.StartTimer()
 
-				filter, err := NewXorFilter(keys)
+				info, err := Create(keys)
 				if err != nil {
 					b.Fatalf("Failed to create filter: %v", err)
 				}
 
-				bitsPerKey := float64(len(filter.Data)*8) / float64(count)
+				bitsPerKey := float64(len(info.Data)*8) / float64(count)
 				b.ReportMetric(bitsPerKey, "bits/key")
-				b.SetBytes(int64(len(filter.Data)))
+				b.SetBytes(int64(len(info.Data)))
 
 				// Prevent compiler optimizations
-				if filter.Data == nil {
+				if info.Data == nil {
 					b.Fatalf("Unexpected nil filter data")
 				}
 			}
@@ -138,7 +136,12 @@ func BenchmarkXorFilterContains(b *testing.B) {
 		keys[i] = fmt.Sprintf("key-%d", i)
 	}
 
-	filter, err := NewXorFilter(keys)
+	info, err := Create(keys)
+	if err != nil {
+		b.Fatalf("Failed to create filter: %v", err)
+	}
+
+	f, err := NewFilter(info)
 	if err != nil {
 		b.Fatalf("Failed to create filter: %v", err)
 	}
@@ -150,9 +153,8 @@ func BenchmarkXorFilterContains(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			key := keys[i%numKeys]
-			contains, err := Contains(filter, key)
-			if err != nil || !contains {
-				b.Fatalf("Expected key to be in filter: %v, err: %v", contains, err)
+			if !f.Contains(key) {
+				b.Fatalf("Expected key to be in filter")
 			}
 		}
 	})
@@ -164,10 +166,7 @@ func BenchmarkXorFilterContains(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			key := fmt.Sprintf("other-key-%d", i)
-			_, err := Contains(filter, key)
-			if err != nil {
-				b.Fatalf("Error checking filter: %v", err)
-			}
+			_ = f.Contains(key)
 		}
 	})
 }
