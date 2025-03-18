@@ -1,7 +1,6 @@
 package filter
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -26,49 +25,34 @@ type serializedFilter struct {
 }
 
 func (sf *serializedFilter) marshal() ([]byte, error) {
-	buf := new(bytes.Buffer)
-	if err := binary.Write(buf, binary.LittleEndian, sf.Seed); err != nil {
-		return nil, err
-	}
-	if err := binary.Write(buf, binary.LittleEndian, sf.SegmentLength); err != nil {
-		return nil, err
-	}
-	if err := binary.Write(buf, binary.LittleEndian, sf.SegmentLengthMask); err != nil {
-		return nil, err
-	}
-	if err := binary.Write(buf, binary.LittleEndian, sf.SegmentCount); err != nil {
-		return nil, err
-	}
-	if err := binary.Write(buf, binary.LittleEndian, sf.SegmentCountLength); err != nil {
-		return nil, err
-	}
-	if err := binary.Write(buf, binary.LittleEndian, sf.Fingerprints); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	headerSize := 8 + 4*4 // uint64 + 4*uint32
+	buf := make([]byte, headerSize+len(sf.Fingerprints))
+
+	binary.LittleEndian.PutUint64(buf[0:], sf.Seed)
+	binary.LittleEndian.PutUint32(buf[8:], sf.SegmentLength)
+	binary.LittleEndian.PutUint32(buf[12:], sf.SegmentLengthMask)
+	binary.LittleEndian.PutUint32(buf[16:], sf.SegmentCount)
+	binary.LittleEndian.PutUint32(buf[20:], sf.SegmentCountLength)
+
+	copy(buf[headerSize:], sf.Fingerprints)
+	return buf, nil
 }
 
 func (sf *serializedFilter) unmarshal(data []byte) error {
-	buf := bytes.NewReader(data)
-	if err := binary.Read(buf, binary.LittleEndian, &sf.Seed); err != nil {
-		return err
+	headerSize := 8 + 4*4 // uint64 + 4*uint32
+	if len(data) < headerSize {
+		return errors.New("data too short for header")
 	}
-	if err := binary.Read(buf, binary.LittleEndian, &sf.SegmentLength); err != nil {
-		return err
-	}
-	if err := binary.Read(buf, binary.LittleEndian, &sf.SegmentLengthMask); err != nil {
-		return err
-	}
-	if err := binary.Read(buf, binary.LittleEndian, &sf.SegmentCount); err != nil {
-		return err
-	}
-	if err := binary.Read(buf, binary.LittleEndian, &sf.SegmentCountLength); err != nil {
-		return err
-	}
-	sf.Fingerprints = make([]uint8, buf.Len())
-	if err := binary.Read(buf, binary.LittleEndian, &sf.Fingerprints); err != nil {
-		return err
-	}
+
+	sf.Seed = binary.LittleEndian.Uint64(data[0:])
+	sf.SegmentLength = binary.LittleEndian.Uint32(data[8:])
+	sf.SegmentLengthMask = binary.LittleEndian.Uint32(data[12:])
+	sf.SegmentCount = binary.LittleEndian.Uint32(data[16:])
+	sf.SegmentCountLength = binary.LittleEndian.Uint32(data[20:])
+
+	sf.Fingerprints = make([]uint8, len(data)-headerSize)
+	copy(sf.Fingerprints, data[headerSize:])
+
 	return nil
 }
 
