@@ -1,4 +1,4 @@
-package filter
+package xor
 
 import (
 	"encoding/binary"
@@ -11,20 +11,20 @@ import (
 )
 
 const (
-	FilterTypeXor      = "xor"
-	FilterVersionXorV1 = "v1"
-	headerSize         = 8 + 4*4 // uint64 + 4*uint32
+	FilterType      = "xor"
+	FilterVersionV1 = "v1"
+	headerSize      = 8 + 4*4 // uint64 + 4*uint32
 )
 
 type Filter struct {
 	xf xorfilter.BinaryFuse8
 }
 
-func NewFilter(f api.FilterInfo) (*Filter, error) {
-	if f.Type != FilterTypeXor {
+func New(f api.FilterInfo) (*Filter, error) {
+	if f.Type != FilterType {
 		return nil, fmt.Errorf("bad type: %s", f.Type)
 	}
-	if f.Version != FilterVersionXorV1 {
+	if f.Version != FilterVersionV1 {
 		return nil, fmt.Errorf("bad version: %s", f.Version)
 	}
 	if len(f.Data) == 0 {
@@ -52,19 +52,16 @@ func (f *Filter) Contains(key string) bool {
 	return f.xf.Contains(hashKey(key))
 }
 
-// Create creates a new XOR filter from a list of keys
 func Create(keys []string) (api.FilterInfo, error) {
 	if len(keys) == 0 {
 		return api.FilterInfo{}, errors.New("empty key set")
 	}
 
-	// Convert keys to []uint64 using FastFilter's hashing
 	hashes := make([]uint64, len(keys))
 	for i, key := range keys {
 		hashes[i] = hashKey(key)
 	}
 
-	// Create the filter
 	filter, err := xorfilter.PopulateBinaryFuse8(hashes)
 	if err != nil {
 		return api.FilterInfo{}, fmt.Errorf("create: %w", err)
@@ -73,7 +70,6 @@ func Create(keys []string) (api.FilterInfo, error) {
 		return api.FilterInfo{}, errors.New("nil filter")
 	}
 
-	// manually serialize the filter
 	sf := serializedFilter{
 		Seed:               filter.Seed,
 		SegmentLength:      uint32(filter.SegmentLength),
@@ -89,8 +85,8 @@ func Create(keys []string) (api.FilterInfo, error) {
 	}
 
 	return api.FilterInfo{
-		Type:    FilterTypeXor,
-		Version: FilterVersionXorV1,
+		Type:    FilterType,
+		Version: FilterVersionV1,
 		Data:    data,
 	}, nil
 }
@@ -113,14 +109,12 @@ type serializedFilter struct {
 func (sf *serializedFilter) marshal() ([]byte, error) {
 	buf := make([]byte, headerSize+len(sf.Fingerprints))
 
-	// header
 	binary.LittleEndian.PutUint64(buf[0:], sf.Seed)
 	binary.LittleEndian.PutUint32(buf[8:], sf.SegmentLength)
 	binary.LittleEndian.PutUint32(buf[12:], sf.SegmentLengthMask)
 	binary.LittleEndian.PutUint32(buf[16:], sf.SegmentCount)
 	binary.LittleEndian.PutUint32(buf[20:], sf.SegmentCountLength)
 
-	// body
 	copy(buf[headerSize:], sf.Fingerprints)
 
 	return buf, nil
@@ -131,14 +125,12 @@ func (sf *serializedFilter) unmarshal(data []byte) error {
 		return errors.New("data too short for header")
 	}
 
-	// header
 	sf.Seed = binary.LittleEndian.Uint64(data[0:])
 	sf.SegmentLength = binary.LittleEndian.Uint32(data[8:])
 	sf.SegmentLengthMask = binary.LittleEndian.Uint32(data[12:])
 	sf.SegmentCount = binary.LittleEndian.Uint32(data[16:])
 	sf.SegmentCountLength = binary.LittleEndian.Uint32(data[20:])
 
-	// body
 	sf.Fingerprints = make([]uint8, len(data)-headerSize)
 	copy(sf.Fingerprints, data[headerSize:])
 

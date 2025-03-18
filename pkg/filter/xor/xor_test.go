@@ -1,4 +1,4 @@
-package filter
+package xor
 
 import (
 	"fmt"
@@ -20,11 +20,11 @@ func TestXorFilterBasics(t *testing.T) {
 	// Create a filter from those keys
 	info, err := Create(keys)
 	require.NoError(t, err)
-	require.Equal(t, FilterTypeXor, info.Type)
-	require.Equal(t, FilterVersionXorV1, info.Version)
+	require.Equal(t, FilterType, info.Type)
+	require.Equal(t, FilterVersionV1, info.Version)
 	require.NotEmpty(t, info.Data)
 
-	f, err := NewFilter(info)
+	f, err := New(info)
 	require.NoError(t, err)
 
 	// All inserted keys should be found (no false negatives)
@@ -60,37 +60,37 @@ func TestXorFilterErrors(t *testing.T) {
 	// Test with invalid filter type
 	invalidTypeFilter := api.FilterInfo{
 		Type:    "invalid",
-		Version: FilterVersionXorV1,
+		Version: FilterVersionV1,
 		Data:    []byte{1, 2, 3},
 	}
-	_, err = NewFilter(invalidTypeFilter)
+	_, err = New(invalidTypeFilter)
 	require.Error(t, err)
 
 	// Test with invalid filter version
 	invalidVersionFilter := api.FilterInfo{
-		Type:    FilterTypeXor,
+		Type:    FilterType,
 		Version: "invalid",
 		Data:    []byte{1, 2, 3},
 	}
-	_, err = NewFilter(invalidVersionFilter)
+	_, err = New(invalidVersionFilter)
 	require.Error(t, err)
 
 	// Test with empty filter data
 	emptyDataFilter := api.FilterInfo{
-		Type:    FilterTypeXor,
-		Version: FilterVersionXorV1,
+		Type:    FilterType,
+		Version: FilterVersionV1,
 		Data:    nil,
 	}
-	_, err = NewFilter(emptyDataFilter)
+	_, err = New(emptyDataFilter)
 	require.Error(t, err)
 
 	// Test with corrupted filter data
 	corruptedDataFilter := api.FilterInfo{
-		Type:    FilterTypeXor,
-		Version: FilterVersionXorV1,
+		Type:    FilterType,
+		Version: FilterVersionV1,
 		Data:    []byte{1, 2, 3}, // Not a valid serialized filter
 	}
-	_, err = NewFilter(corruptedDataFilter)
+	_, err = New(corruptedDataFilter)
 	require.Error(t, err)
 }
 
@@ -141,7 +141,7 @@ func BenchmarkXorFilterContains(b *testing.B) {
 		b.Fatalf("Failed to create filter: %v", err)
 	}
 
-	f, err := NewFilter(info)
+	f, err := New(info)
 	if err != nil {
 		b.Fatalf("Failed to create filter: %v", err)
 	}

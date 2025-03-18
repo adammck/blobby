@@ -2,15 +2,30 @@ package filter
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
+	"github.com/adammck/blobby/pkg/filter/xor"
 )
 
+type Filter interface {
+	Contains(key string) bool
+}
+
+func newFilterFromInfo(info api.FilterInfo) (Filter, error) {
+	switch info.Type {
+	case xor.FilterType:
+		return xor.New(info)
+	default:
+		return nil, fmt.Errorf("unknown filter type: %s", info.Type)
+	}
+}
+
 type cacheEntry struct {
-	filter *Filter
+	filter Filter
 	info   api.FilterInfo
 	expiry time.Time
 }
@@ -20,7 +35,7 @@ type FilterCache struct {
 	cache     map[string]cacheEntry
 	mu        sync.RWMutex
 	ttl       time.Duration
-	maxSize   int // max number of filters to cache
+	maxSize   int
 	hitCount  int64
 	missCount int64
 }
@@ -35,7 +50,6 @@ func NewFilterCache(store api.FilterStore, ttl time.Duration, maxSize int) *Filt
 }
 
 func (c *FilterCache) Get(ctx context.Context, filename string) (api.FilterInfo, error) {
-	// Check cache first with read lock
 	c.mu.RLock()
 	entry, ok := c.cache[filename]
 	c.mu.RUnlock()
@@ -47,22 +61,19 @@ func (c *FilterCache) Get(ctx context.Context, filename string) (api.FilterInfo,
 
 	atomic.AddInt64(&c.missCount, 1)
 
-	// Cache miss or expired, fetch from store
 	info, err := c.store.Get(ctx, filename)
 	if err != nil {
 		return api.FilterInfo{}, err
 	}
 
-	f, err := NewFilter(info)
+	f, err := newFilterFromInfo(info)
 	if err != nil {
 		return api.FilterInfo{}, err
 	}
 
-	// Update cache with write lock
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Evict if we're at capacity
 	if len(c.cache) >= c.maxSize {
 		c.evict()
 	}
@@ -77,21 +88,18 @@ func (c *FilterCache) Get(ctx context.Context, filename string) (api.FilterInfo,
 }
 
 func (c *FilterCache) Put(ctx context.Context, filename string, filter api.FilterInfo) error {
-	// Update the store
 	if err := c.store.Put(ctx, filename, filter); err != nil {
 		return err
 	}
 
-	f, err := NewFilter(filter)
+	f, err := newFilterFromInfo(filter)
 	if err != nil {
 		return err
 	}
 
-	// Update the cache
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Evict if we're at capacity
 	if len(c.cache) >= c.maxSize && c.cache[filename].info.Data == nil {
 		c.evict()
 	}
@@ -106,12 +114,10 @@ func (c *FilterCache) Put(ctx context.Context, filename string, filter api.Filte
 }
 
 func (c *FilterCache) Delete(ctx context.Context, filename string) error {
-	// Delete from store
 	if err := c.store.Delete(ctx, filename); err != nil {
 		return err
 	}
 
-	// Delete from cache
 	c.mu.Lock()
 	delete(c.cache, filename)
 	c.mu.Unlock()
@@ -120,7 +126,6 @@ func (c *FilterCache) Delete(ctx context.Context, filename string) error {
 }
 
 func (c *FilterCache) evict() {
-	// Simple strategy: evict the oldest entry
 	var oldest string
 	var oldestTime time.Time
 
@@ -136,7 +141,6 @@ func (c *FilterCache) evict() {
 	}
 }
 
-// Metrics returns cache hit/miss statistics
 func (c *FilterCache) Metrics() (hits, misses int64) {
 	return atomic.LoadInt64(&c.hitCount), atomic.LoadInt64(&c.missCount)
 }

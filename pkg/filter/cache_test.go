@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
+	"github.com/adammck/blobby/pkg/filter/xor"
 	"github.com/stretchr/testify/require"
 )
 
@@ -50,7 +51,7 @@ func TestFilterCache(t *testing.T) {
 
 	// Create test data
 	keys := []string{"key1", "key2", "key3"}
-	info, err := Create(keys)
+	info, err := xor.Create(keys)
 	require.NoError(t, err)
 
 	// Test Put
@@ -113,7 +114,7 @@ func TestCacheConcurrent(t *testing.T) {
 
 	// Create some test data
 	keys := []string{"key1", "key2", "key3"}
-	info, err := Create(keys)
+	info, err := xor.Create(keys)
 	require.NoError(t, err)
 
 	err = cache.Put(ctx, "file.sst", info)
