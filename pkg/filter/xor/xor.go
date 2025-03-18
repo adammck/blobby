@@ -58,7 +58,9 @@ func Create(keys []string) (*Filter, error) {
 }
 
 func (f *Filter) Contains(key string) bool {
-	return f.xf.Contains(hashKey(key))
+	x := f.xf.Contains(hashKey(key))
+	//log.Printf("Contains(%s) = %v", key, x)
+	return x
 }
 
 func (f *Filter) Marshal() (api.FilterInfo, error) {

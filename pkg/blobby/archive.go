@@ -45,6 +45,10 @@ type Blobby struct {
 	// index cache
 	indexesMu sync.Mutex
 	indexes   map[string]*index.Index
+
+	// filter cache
+	filtersMu sync.Mutex
+	filters   map[string]filter.Filter
 }
 
 func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *Blobby {
@@ -76,6 +80,7 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *B
 		fopts: fopts,
 
 		indexes: map[string]*index.Index{},
+		filters: map[string]filter.Filter{},
 	}
 }
 
@@ -130,6 +135,7 @@ func (b *Blobby) Put(ctx context.Context, key string, value []byte) (string, err
 type GetStats struct {
 	Source         string
 	BlobsFetched   int
+	BlobsSkipped   int
 	RecordsScanned int
 }
 
@@ -155,7 +161,19 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetS
 	// note: this assumes that metas is already sorted.
 	for _, meta := range metas {
 
-		// fetch the index for this sstable. hopefully cached.
+		// check the (bloom) filter first, and skip the entire sstable if we can
+		// confirm that no versions of the key are in it.
+		f, err := b.getFilter(ctx, meta.Filename())
+		if err != nil {
+			// TODO: log and continue instead of returning.
+			return nil, stats, fmt.Errorf("filter.Load: %w", err)
+		}
+		if !f.Contains(key) {
+			stats.BlobsSkipped++
+			continue
+		}
+
+		// fetch the index for this sstable. hopefully it's cached.
 		idx, err := b.getIndex(ctx, meta.Filename())
 		if err != nil {
 			return nil, stats, fmt.Errorf("getIndex(%s): %w", key, err)
@@ -229,6 +247,32 @@ func (b *Blobby) getIndex(ctx context.Context, fn string) (*index.Index, error) 
 	ix := index.New(ixs)
 	b.indexes[fn] = ix
 	return ix, nil
+}
+
+// getFilter returns the filter for the given sstable. If it's not already in
+// the cache, it will be fetched from the FilterStore and cached forever.
+//
+// TODO: add some kind of expiration policy.
+func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error) {
+	b.filtersMu.Lock()
+	defer b.filtersMu.Unlock()
+
+	if f, ok := b.filters[fn]; ok {
+		return f, nil
+	}
+
+	fi, err := b.fs.Get(ctx, fn)
+	if err != nil {
+		return nil, err
+	}
+
+	f, err := filter.Load(fi)
+	if err != nil {
+		return nil, err
+	}
+
+	b.filters[fn] = f
+	return f, nil
 }
 
 // Scan reads from the given sstable reader until it finds a record with the
