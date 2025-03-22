@@ -13,8 +13,15 @@ type Filter interface {
 	Marshal() (api.Filter, error)
 }
 
-func Create(keys []string) (Filter, error) {
-	return xor.Create(keys)
+func Create(ft string, keys []string) (Filter, error) {
+	switch ft {
+	case xor.TypeName:
+		return xor.Create(keys)
+	case mod.TypeName:
+		return mod.Create(keys)
+	default:
+		return nil, fmt.Errorf("unknown filter type: %s", ft)
+	}
 }
 
 func Unmarshal(f api.Filter) (Filter, error) {

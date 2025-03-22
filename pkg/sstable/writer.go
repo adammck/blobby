@@ -164,7 +164,7 @@ func (w *Writer) Write(out io.Writer) (*Meta, []api.IndexEntry, filter.Filter, e
 	// construct the filter in a single call, since some types (e.g. xor) can't
 	// be built incrementally. it would be nice to encapsulat the accumulation,
 	// but this seems fine for now.
-	f, err := filter.Create(keys)
+	f, err := filter.Create(w.filterType, keys)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("filter.Create: %w", err)
 	}
