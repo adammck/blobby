@@ -19,22 +19,20 @@ import (
 )
 
 type Compactor struct {
-	bs        *blobstore.Blobstore
-	md        *metadata.Store
-	ixs       api.IndexStore
-	fs        api.FilterStore
-	flushOpts []sstable.WriterOption
-	clock     clockwork.Clock
+	bs    *blobstore.Blobstore
+	md    *metadata.Store
+	ixs   api.IndexStore
+	fs    api.FilterStore
+	clock clockwork.Clock
 }
 
-func New(clock clockwork.Clock, bs *blobstore.Blobstore, md *metadata.Store, ixs api.IndexStore, fs api.FilterStore, flushOpts []sstable.WriterOption) *Compactor {
+func New(clock clockwork.Clock, bs *blobstore.Blobstore, md *metadata.Store, ixs api.IndexStore, fs api.FilterStore) *Compactor {
 	return &Compactor{
-		clock:     clock,
-		bs:        bs,
-		md:        md,
-		ixs:       ixs,
-		fs:        fs,
-		flushOpts: flushOpts,
+		clock: clock,
+		bs:    bs,
+		md:    md,
+		ixs:   ixs,
+		fs:    fs,
 	}
 }
 
@@ -180,7 +178,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 
 	g.Go(func() error {
 		var err error
-		_, _, meta, idx, f, err = c.bs.Flush(ctx2, ch, c.flushOpts...)
+		_, _, meta, idx, f, err = c.bs.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}

@@ -39,9 +39,6 @@ type Blobby struct {
 	clock clockwork.Clock
 	comp  *compactor.Compactor
 
-	// Options for the SSTable writer.
-	fopts []sstable.WriterOption
-
 	// index cache
 	indexesMu sync.Mutex
 	indexes   map[string]*index.Index
@@ -51,7 +48,7 @@ type Blobby struct {
 	filters   map[string]filter.Filter
 }
 
-func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *Blobby {
+func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, factory sstable.Factory) *Blobby {
 	db, err := connectToMongo(ctx, mongoURL)
 	if err != nil {
 		// TODO: return error, obviously
@@ -60,14 +57,10 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *B
 
 	ixs := mindexstore.New(db)
 	fs := mfilterstore.New(db)
-	bs := blobstore.New(bucket, clock)
 	md := metadata.New(mongoURL)
 
-	// TODO: make this configurable
-	// TODO: also use more sensible defaults
-	fopts := []sstable.WriterOption{
-		sstable.WithIndexEveryNRecords(32),
-	}
+	// Create blobstore with factory
+	bs := blobstore.New(bucket, clock, factory)
 
 	return &Blobby{
 		mt:    memtable.New(mongoURL, clock),
@@ -76,8 +69,7 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock) *B
 		ixs:   ixs,
 		fs:    fs,
 		clock: clock,
-		comp:  compactor.New(clock, bs, md, ixs, fs, fopts),
-		fopts: fopts,
+		comp:  compactor.New(clock, bs, md, ixs, fs),
 
 		indexes: map[string]*index.Index{},
 		filters: map[string]filter.Filter{},
@@ -347,7 +339,7 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 
 	g.Go(func() error {
 		var err error
-		dest, _, meta, idx, f, err = b.bs.Flush(ctx2, ch, b.fopts...)
+		dest, _, meta, idx, f, err = b.bs.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}

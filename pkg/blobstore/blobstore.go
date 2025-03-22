@@ -19,15 +19,17 @@ import (
 var ErrNoRecords = errors.New("NoRecords")
 
 type Blobstore struct {
-	bucket string
-	s3     *s3.Client
-	clock  clockwork.Clock
+	bucket  string
+	s3      *s3.Client
+	clock   clockwork.Clock
+	factory sstable.Factory
 }
 
-func New(bucket string, clock clockwork.Clock) *Blobstore {
+func New(bucket string, clock clockwork.Clock, factory sstable.Factory) *Blobstore {
 	return &Blobstore{
-		bucket: bucket,
-		clock:  clock,
+		bucket:  bucket,
+		clock:   clock,
+		factory: factory,
 	}
 }
 
@@ -113,7 +115,7 @@ func (bs *Blobstore) Init(ctx context.Context) error {
 }
 
 // TODO: remove most of the return values; meta contains everything.
-func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record, opts ...sstable.WriterOption) (dest string, count int, meta *sstable.Meta, index []api.IndexEntry, filter filter.Filter, err error) {
+func (bs *Blobstore) Flush(ctx context.Context, ch <-chan *types.Record) (dest string, count int, meta *sstable.Meta, index []api.IndexEntry, filter filter.Filter, err error) {
 	f, err := os.CreateTemp("", "sstable-*")
 	if err != nil {
 		return "", 0, nil, nil, nil, fmt.Errorf("CreateTemp: %w", err)
@@ -121,8 +123,7 @@ func (bs *Blobstore) Flush(ctx context.Context, ch chan *types.Record, opts ...s
 	defer os.Remove(f.Name())
 	defer f.Close()
 
-	w := sstable.NewWriter(bs.clock, opts...)
-
+	w := bs.factory.NewWriter()
 	n := 0
 	for rec := range ch {
 		err = w.Add(rec)

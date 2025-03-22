@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adammck/blobby/pkg/sstable"
 	testsst "github.com/adammck/blobby/pkg/sstable/testutil"
 	"github.com/adammck/blobby/pkg/testdeps"
 	"github.com/adammck/blobby/pkg/types"
@@ -17,7 +18,8 @@ func setup(t *testing.T) (context.Context, *testdeps.Env, *Blobstore, clockwork.
 	ctx := context.Background()
 	env := testdeps.New(ctx, t, testdeps.WithMinio())
 	clock := clockwork.NewFakeClock()
-	bs := New(env.S3Bucket, clock)
+	sf := sstable.NewFactory(clock)
+	bs := New(env.S3Bucket, clock, sf)
 
 	err := bs.Ping(ctx)
 	require.NoError(t, err)
