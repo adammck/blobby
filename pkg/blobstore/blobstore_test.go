@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adammck/blobby/pkg/sstable"
 	testsst "github.com/adammck/blobby/pkg/sstable/testutil"
 	"github.com/adammck/blobby/pkg/testdeps"
 	"github.com/adammck/blobby/pkg/types"
@@ -17,7 +18,8 @@ func setup(t *testing.T) (context.Context, *testdeps.Env, *Blobstore, clockwork.
 	ctx := context.Background()
 	env := testdeps.New(ctx, t, testdeps.WithMinio())
 	clock := clockwork.NewFakeClock()
-	bs := New(env.S3Bucket, clock)
+	sf := sstable.NewFactory(clock)
+	bs := New(env.S3Bucket, clock, sf)
 
 	err := bs.Ping(ctx)
 	require.NoError(t, err)
@@ -31,7 +33,7 @@ func TestFlushEmpty(t *testing.T) {
 	ch := make(chan *types.Record)
 	close(ch)
 
-	_, _, _, _, err := bs.Flush(ctx, ch)
+	_, _, _, _, _, err := bs.Flush(ctx, ch)
 	assert.ErrorIs(t, err, ErrNoRecords)
 	//assert.Len(t, idx.Contents, 0)
 }
@@ -54,7 +56,7 @@ func TestFlush(t *testing.T) {
 		close(ch)
 	}()
 
-	_, n, meta, idx, err := bs.Flush(ctx, ch)
+	_, n, meta, idx, _, err := bs.Flush(ctx, ch)
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
 	assert.Equal(t, "test1", meta.MinKey)

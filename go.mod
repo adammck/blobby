@@ -65,6 +65,7 @@ require (
 )
 
 require (
+	github.com/FastFilter/xorfilter v0.2.1
 	github.com/aws/aws-sdk-go-v2 v1.32.8
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.7 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.50 // indirect

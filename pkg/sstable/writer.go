@@ -8,8 +8,13 @@ import (
 	"sync"
 
 	"github.com/adammck/blobby/pkg/api"
+	"github.com/adammck/blobby/pkg/filter"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
+)
+
+const (
+	defaultFilterType = "xor"
 )
 
 type Writer struct {
@@ -21,6 +26,7 @@ type Writer struct {
 
 	indexRecordFreq int
 	indexByteFreq   int
+	filterType      string
 }
 
 type WriterOption func(*Writer)
@@ -42,10 +48,19 @@ func WithIndexEveryNBytes(n int) WriterOption {
 	}
 }
 
+// WithFilter sets the filter type to use. See defaultFilterType for the
+// default value.
+func WithFilter(ft string) WriterOption {
+	return func(w *Writer) {
+		w.filterType = ft
+	}
+}
+
 // TODO: Make the clock an option, too.
 func NewWriter(clock clockwork.Clock, options ...WriterOption) *Writer {
 	w := &Writer{
-		clock: clock,
+		clock:      clock,
+		filterType: defaultFilterType,
 	}
 
 	for _, opt := range options {
@@ -64,7 +79,7 @@ func (w *Writer) Add(record *types.Record) error {
 
 // Write writes the SSTable to the given writer, and returns the corresponding
 // index entries which should be persited somewhere via an IndexStore.
-func (w *Writer) Write(out io.Writer) (*Meta, []api.IndexEntry, error) {
+func (w *Writer) Write(out io.Writer) (*Meta, []api.IndexEntry, filter.Filter, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -83,7 +98,7 @@ func (w *Writer) Write(out io.Writer) (*Meta, []api.IndexEntry, error) {
 
 	n, err := out.Write([]byte(magicBytes))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	m := &Meta{
@@ -96,6 +111,10 @@ func (w *Writer) Write(out io.Writer) (*Meta, []api.IndexEntry, error) {
 	idxBytes := 0
 
 	var idx []api.IndexEntry
+
+	prevKey := ""
+	keys := []string{}
+
 	for i, record := range w.records {
 		if i == 0 || w.shouldCreateIndex(idxRecs, idxBytes) {
 			idx = append(idx, api.IndexEntry{
@@ -108,7 +127,7 @@ func (w *Writer) Write(out io.Writer) (*Meta, []api.IndexEntry, error) {
 
 		n, err := record.Write(out)
 		if err != nil {
-			return nil, nil, fmt.Errorf("record.Write: %w", err)
+			return nil, nil, nil, fmt.Errorf("record.Write: %w", err)
 		}
 
 		offset += int64(n)
@@ -134,9 +153,23 @@ func (w *Writer) Write(out io.Writer) (*Meta, []api.IndexEntry, error) {
 		if m.MaxTime.IsZero() || record.Timestamp.After(m.MaxTime) {
 			m.MaxTime = record.Timestamp
 		}
+
+		// accumulate keys for the (bloom) filter, ignoring timestamps.
+		if prevKey != record.Key {
+			keys = append(keys, record.Key)
+			prevKey = record.Key
+		}
 	}
 
-	return m, idx, nil
+	// construct the filter in a single call, since some types (e.g. xor) can't
+	// be built incrementally. it would be nice to encapsulat the accumulation,
+	// but this seems fine for now.
+	f, err := filter.Create(w.filterType, keys)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("filter.Create: %w", err)
+	}
+
+	return m, idx, f, nil
 }
 
 func (w *Writer) shouldCreateIndex(recordsSinceIndex, bytesSinceIndex int) bool {

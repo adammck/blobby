@@ -140,6 +140,7 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 
 	t.Log("Stats:")
 	t.Logf("- blobs fetched: %d", state.stats.blobsFetched)
+	t.Logf("- blobs skipped: %d", state.stats.blobsSkipped)
 	t.Logf("- records scanned: %d", state.stats.totalRecordsScanned)
 	t.Logf("- worst scan: %d recs", state.stats.maxRecordsScanned)
 	t.Logf("- mean scan: %.1f recs", state.stats.meanRecordsScanned())
@@ -158,6 +159,7 @@ type testState struct {
 type testStats struct {
 	numGets             uint64
 	blobsFetched        uint64
+	blobsSkipped        uint64
 	totalRecordsScanned uint64
 	maxRecordsScanned   uint64
 }
@@ -165,6 +167,7 @@ type testStats struct {
 func (s *testStats) incr(stats *GetStats) {
 	s.numGets += 1
 	s.blobsFetched += uint64(stats.BlobsFetched)
+	s.blobsSkipped += uint64(stats.BlobsSkipped)
 	s.totalRecordsScanned += uint64(stats.RecordsScanned)
 	if uint64(stats.RecordsScanned) > s.maxRecordsScanned {
 		s.maxRecordsScanned = uint64(stats.RecordsScanned)

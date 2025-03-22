@@ -12,6 +12,7 @@ import (
 
 	"github.com/adammck/blobby/pkg/blobby"
 	"github.com/adammck/blobby/pkg/compactor"
+	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/jonboulle/clockwork"
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -37,7 +38,9 @@ func main() {
 		log.Fatalf("Required: S3_BUCKET")
 	}
 
-	b := blobby.New(ctx, mongoURL, bucket, clockwork.NewRealClock())
+	clock := clockwork.NewRealClock()
+	factory := sstable.NewFactory(clock, sstable.WithIndexEveryNRecords(32))
+	b := blobby.New(ctx, mongoURL, bucket, clock, factory)
 
 	err := b.Ping(ctx)
 	if err != nil {

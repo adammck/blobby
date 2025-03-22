@@ -18,7 +18,8 @@ func setup(t *testing.T, clock clockwork.Clock) (context.Context, *testdeps.Env,
 	ctx := context.Background()
 	env := testdeps.New(ctx, t, testdeps.WithMongo(), testdeps.WithMinio())
 
-	b := New(ctx, env.MongoURL(), env.S3Bucket, clock)
+	sf := sstable.NewFactory(clock, sstable.WithIndexEveryNRecords(8), sstable.WithFilter("mod"))
+	b := New(ctx, env.MongoURL(), env.S3Bucket, clock, sf)
 
 	err := b.Init(ctx)
 	require.NoError(t, err)
@@ -246,15 +247,16 @@ func TestBasicWriteRead(t *testing.T) {
 	// sstables, and scan through the first to check that the key isn't present
 	// before moving onto the second one.
 	//
-	// later, we'll optimize this with bloom filters, so we can often skip the
-	// first fetch. not implemented yet. we'll also index them, so we can fetch
-	// a subset of keys, but that's also not implemented.
+	// we're using the 'mod' filter, which return false positives for keys with
+	// an even suffix (like this one), so we fetch both sstables. later we'll
+	// skip some.
 	val, gstats = tb.get("012")
 	require.Equal(t, val, docs["012"])
 	require.Equal(t, &GetStats{
 		Source:         t3.sstable,
 		BlobsFetched:   2, // <--
-		RecordsScanned: 4, // (003, 013), (011, 012)
+		BlobsSkipped:   0,
+		RecordsScanned: 4,
 	}, gstats)
 
 	// -------------------------------------- part three: simple compaction ----
@@ -295,13 +297,15 @@ func TestBasicWriteRead(t *testing.T) {
 		RecordsScanned: 3,
 	}, gstats)
 
-	// and another one. same source.
+	// and another one. same source. we scan six records here, because the
+	// sparse index (every eight records; see test setup) allows us to skip
+	// straight to record 008.
 	val, gstats = tb.get("013")
 	require.Equal(t, []byte("yyy"), val)
 	require.Equal(t, &GetStats{
 		Source:         t5.sstable,
 		BlobsFetched:   1,
-		RecordsScanned: 14,
+		RecordsScanned: 6,
 	}, gstats)
 
 	// check that the old sstables were deleted.
