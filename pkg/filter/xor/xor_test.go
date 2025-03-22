@@ -62,7 +62,7 @@ func TestXorFilterErrors(t *testing.T) {
 		Type: "invalid",
 		Data: []byte{1, 2, 3},
 	}
-	_, err = New(invalidTypeFilter)
+	_, err = Unmarshal(invalidTypeFilter)
 	require.Error(t, err)
 
 	// Test with empty filter data
@@ -70,7 +70,7 @@ func TestXorFilterErrors(t *testing.T) {
 		Type: FilterType,
 		Data: nil,
 	}
-	_, err = New(emptyDataFilter)
+	_, err = Unmarshal(emptyDataFilter)
 	require.Error(t, err)
 
 	// Test with corrupted filter data
@@ -78,7 +78,7 @@ func TestXorFilterErrors(t *testing.T) {
 		Type: FilterType,
 		Data: []byte{1, 2, 3}, // Not a valid serialized filter
 	}
-	_, err = New(corruptedDataFilter)
+	_, err = Unmarshal(corruptedDataFilter)
 	require.Error(t, err)
 }
 

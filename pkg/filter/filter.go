@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/adammck/blobby/pkg/api"
+	"github.com/adammck/blobby/pkg/filter/mod"
 	"github.com/adammck/blobby/pkg/filter/xor"
 )
 
@@ -16,10 +17,12 @@ func Create(keys []string) (Filter, error) {
 	return xor.Create(keys)
 }
 
-func Load(f api.Filter) (Filter, error) {
+func Unmarshal(f api.Filter) (Filter, error) {
 	switch f.Type {
 	case xor.FilterType:
-		return xor.New(f)
+		return xor.Unmarshal(f)
+	case mod.FilterType:
+		return mod.Unmarshal(f)
 	default:
 		return nil, fmt.Errorf("unknown filter type: %s", f.Type)
 	}

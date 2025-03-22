@@ -19,7 +19,7 @@ type Filter struct {
 	xf *xorfilter.BinaryFuse8
 }
 
-func New(f api.Filter) (*Filter, error) {
+func Unmarshal(f api.Filter) (*Filter, error) {
 	if f.Type != FilterType {
 		return nil, fmt.Errorf("bad type: %s", f.Type)
 	}

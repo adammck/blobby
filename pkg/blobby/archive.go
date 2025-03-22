@@ -266,7 +266,7 @@ func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error
 		return nil, err
 	}
 
-	f, err := filter.Load(fi)
+	f, err := filter.Unmarshal(fi)
 	if err != nil {
 		return nil, err
 	}
