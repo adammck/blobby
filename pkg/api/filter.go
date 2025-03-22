@@ -9,15 +9,14 @@ type FilterCreator interface {
 	Create(keys []string) (Filter, error)
 }
 
-// Filter encapsulates a filter with its type information
+// Filter encapsulates a serialized set-membership filter, e.g. a bloom filter,
+// and the type information needed to deserialize it. These are read from and
+// written to a FilterStore.
 type Filter struct {
-	// Type identifies the filter algorithm (e.g., "xor", "ribbon", "bloom")
+	// Type identifies the algorithm (e.g., "xor", "ribbon", "bloom").
 	Type string `bson:"type"`
 
-	// Version allows for backward compatibility within a filter type
-	Version string `bson:"version"`
-
-	// Data contains the serialized filter
+	// Data contains the serialized filter.
 	Data []byte `bson:"data"`
 }
 

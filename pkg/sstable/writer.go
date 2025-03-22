@@ -13,16 +13,20 @@ import (
 	"github.com/jonboulle/clockwork"
 )
 
+const (
+	defaultFilterType = "xor"
+)
+
 type Writer struct {
 	records []*types.Record
 	mu      sync.Mutex
 	clock   clockwork.Clock
 
 	// set via options on constructor.
+
 	indexRecordFreq int
 	indexByteFreq   int
 	filterType      string
-	filterVersion   string
 }
 
 type WriterOption func(*Writer)
@@ -44,20 +48,19 @@ func WithIndexEveryNBytes(n int) WriterOption {
 	}
 }
 
-// WithFilter sets the filter type and version
-func WithFilter(filterType, filterVersion string) WriterOption {
+// WithFilter sets the filter type to use. See defaultFilterType for the
+// default value.
+func WithFilter(ft string) WriterOption {
 	return func(w *Writer) {
-		w.filterType = filterType
-		w.filterVersion = filterVersion
+		w.filterType = ft
 	}
 }
 
 // TODO: Make the clock an option, too.
 func NewWriter(clock clockwork.Clock, options ...WriterOption) *Writer {
 	w := &Writer{
-		clock:         clock,
-		filterType:    "xor", // default
-		filterVersion: "v1",  // default
+		clock:      clock,
+		filterType: defaultFilterType,
 	}
 
 	for _, opt := range options {

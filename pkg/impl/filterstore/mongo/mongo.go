@@ -31,9 +31,8 @@ func (s *FilterStore) Put(ctx context.Context, filename string, f api.Filter) er
 		ctx,
 		bson.M{kId: filename},
 		bson.M{"$set": bson.M{
-			"type":    f.Type,
-			"version": f.Version,
-			"data":    f.Data,
+			"type": f.Type,
+			"data": f.Data,
 		}},
 		opts,
 	)
@@ -45,9 +44,8 @@ func (s *FilterStore) Put(ctx context.Context, filename string, f api.Filter) er
 
 func (s *FilterStore) Get(ctx context.Context, filename string) (api.Filter, error) {
 	var result struct {
-		Type    string `bson:"type"`
-		Version string `bson:"version"`
-		Data    []byte `bson:"data"`
+		Type string `bson:"type"`
+		Data []byte `bson:"data"`
 	}
 
 	err := s.db.Collection(collection).FindOne(ctx, bson.M{kId: filename}).Decode(&result)
@@ -59,9 +57,8 @@ func (s *FilterStore) Get(ctx context.Context, filename string) (api.Filter, err
 	}
 
 	return api.Filter{
-		Type:    result.Type,
-		Version: result.Version,
-		Data:    result.Data,
+		Type: result.Type,
+		Data: result.Data,
 	}, nil
 }
 

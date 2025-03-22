@@ -25,7 +25,6 @@ func TestXorFilterBasics(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, FilterType, info.Type)
-	require.Equal(t, FilterVersion, info.Version)
 	require.NotEmpty(t, info.Data)
 
 	// All inserted keys should be found (no false negatives)
@@ -59,37 +58,25 @@ func TestXorFilterErrors(t *testing.T) {
 	require.Error(t, err)
 
 	// Test with invalid filter type
-	invalidTypeFilter := api.FilterInfo{
-		Type:    "invalid",
-		Version: FilterVersion,
-		Data:    []byte{1, 2, 3},
+	invalidTypeFilter := api.Filter{
+		Type: "invalid",
+		Data: []byte{1, 2, 3},
 	}
 	_, err = New(invalidTypeFilter)
 	require.Error(t, err)
 
-	// Test with invalid filter version
-	invalidVersionFilter := api.FilterInfo{
-		Type:    FilterType,
-		Version: "invalid",
-		Data:    []byte{1, 2, 3},
-	}
-	_, err = New(invalidVersionFilter)
-	require.Error(t, err)
-
 	// Test with empty filter data
-	emptyDataFilter := api.FilterInfo{
-		Type:    FilterType,
-		Version: FilterVersion,
-		Data:    nil,
+	emptyDataFilter := api.Filter{
+		Type: FilterType,
+		Data: nil,
 	}
 	_, err = New(emptyDataFilter)
 	require.Error(t, err)
 
 	// Test with corrupted filter data
-	corruptedDataFilter := api.FilterInfo{
-		Type:    FilterType,
-		Version: FilterVersion,
-		Data:    []byte{1, 2, 3}, // Not a valid serialized filter
+	corruptedDataFilter := api.Filter{
+		Type: FilterType,
+		Data: []byte{1, 2, 3}, // Not a valid serialized filter
 	}
 	_, err = New(corruptedDataFilter)
 	require.Error(t, err)

@@ -11,9 +11,8 @@ import (
 )
 
 const (
-	FilterType    = "xor"
-	FilterVersion = "v1"
-	headerSize    = 8 + 4*4 // uint64 + 4*uint32
+	FilterType = "xor"
+	headerSize = 8 + 4*4 // uint64 + 4*uint32
 )
 
 type Filter struct {
@@ -23,9 +22,6 @@ type Filter struct {
 func New(f api.Filter) (*Filter, error) {
 	if f.Type != FilterType {
 		return nil, fmt.Errorf("bad type: %s", f.Type)
-	}
-	if f.Version != FilterVersion {
-		return nil, fmt.Errorf("bad version: %s", f.Version)
 	}
 	if len(f.Data) == 0 {
 		return nil, errors.New("empty data")
@@ -70,9 +66,8 @@ func (f *Filter) Marshal() (api.Filter, error) {
 	}
 
 	return api.Filter{
-		Type:    FilterType,
-		Version: FilterVersion,
-		Data:    data,
+		Type: FilterType,
+		Data: data,
 	}, nil
 }
 
