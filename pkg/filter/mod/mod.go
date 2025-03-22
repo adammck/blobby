@@ -8,7 +8,7 @@ import (
 	"github.com/adammck/blobby/pkg/api"
 )
 
-const FilterType = "mod"
+const TypeName = "mod"
 
 // mod.Filter is a filter that only contains keys where the ascii code of the
 // last character is even. This is just for testing, because an actual bloom
@@ -18,7 +18,7 @@ type Filter struct {
 }
 
 func Unmarshal(f api.Filter) (*Filter, error) {
-	if f.Type != FilterType {
+	if f.Type != TypeName {
 		return nil, fmt.Errorf("bad type: %s", f.Type)
 	}
 	if len(f.Data) == 0 {
@@ -31,12 +31,12 @@ func Unmarshal(f api.Filter) (*Filter, error) {
 		return nil, err
 	}
 
-	keysMap := make(map[string]struct{}, len(keys))
+	km := make(map[string]struct{}, len(keys))
 	for _, k := range keys {
-		keysMap[k] = struct{}{}
+		km[k] = struct{}{}
 	}
 
-	return &Filter{keys: keysMap}, nil
+	return &Filter{keys: km}, nil
 }
 
 func Create(keys []string) (*Filter, error) {
@@ -44,17 +44,17 @@ func Create(keys []string) (*Filter, error) {
 		return nil, errors.New("empty key set")
 	}
 
-	keysMap := make(map[string]struct{})
+	km := make(map[string]struct{})
 	for _, key := range keys {
 		if len(key) > 0 {
-			lastChar := key[len(key)-1]
-			if lastChar%2 == 0 {
-				keysMap[key] = struct{}{}
+			chr := key[len(key)-1]
+			if chr%2 == 0 {
+				km[key] = struct{}{}
 			}
 		}
 	}
 
-	return &Filter{keys: keysMap}, nil
+	return &Filter{keys: km}, nil
 }
 
 func (f *Filter) Contains(key string) bool {
@@ -62,13 +62,13 @@ func (f *Filter) Contains(key string) bool {
 		return false
 	}
 
-	lastChar := key[len(key)-1]
-	if lastChar%2 != 0 {
+	chr := key[len(key)-1]
+	if chr%2 != 0 {
 		return false
 	}
 
-	_, exists := f.keys[key]
-	return exists
+	_, ok := f.keys[key]
+	return ok
 }
 
 func (f *Filter) Marshal() (api.Filter, error) {
@@ -83,7 +83,7 @@ func (f *Filter) Marshal() (api.Filter, error) {
 	}
 
 	return api.Filter{
-		Type: FilterType,
+		Type: TypeName,
 		Data: data,
 	}, nil
 }

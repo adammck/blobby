@@ -19,9 +19,9 @@ func Create(keys []string) (Filter, error) {
 
 func Unmarshal(f api.Filter) (Filter, error) {
 	switch f.Type {
-	case xor.FilterType:
+	case xor.TypeName:
 		return xor.Unmarshal(f)
-	case mod.FilterType:
+	case mod.TypeName:
 		return mod.Unmarshal(f)
 	default:
 		return nil, fmt.Errorf("unknown filter type: %s", f.Type)

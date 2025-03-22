@@ -24,7 +24,7 @@ func TestXorFilterBasics(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, err)
-	require.Equal(t, FilterType, info.Type)
+	require.Equal(t, TypeName, info.Type)
 	require.NotEmpty(t, info.Data)
 
 	// All inserted keys should be found (no false negatives)
@@ -67,7 +67,7 @@ func TestXorFilterErrors(t *testing.T) {
 
 	// Test with empty filter data
 	emptyDataFilter := api.Filter{
-		Type: FilterType,
+		Type: TypeName,
 		Data: nil,
 	}
 	_, err = Unmarshal(emptyDataFilter)
@@ -75,7 +75,7 @@ func TestXorFilterErrors(t *testing.T) {
 
 	// Test with corrupted filter data
 	corruptedDataFilter := api.Filter{
-		Type: FilterType,
+		Type: TypeName,
 		Data: []byte{1, 2, 3}, // Not a valid serialized filter
 	}
 	_, err = Unmarshal(corruptedDataFilter)

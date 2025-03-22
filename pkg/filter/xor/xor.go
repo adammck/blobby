@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	FilterType = "xor"
+	TypeName   = "xor"
 	headerSize = 8 + 4*4 // uint64 + 4*uint32
 )
 
@@ -20,7 +20,7 @@ type Filter struct {
 }
 
 func Unmarshal(f api.Filter) (*Filter, error) {
-	if f.Type != FilterType {
+	if f.Type != TypeName {
 		return nil, fmt.Errorf("bad type: %s", f.Type)
 	}
 	if len(f.Data) == 0 {
@@ -55,7 +55,6 @@ func Create(keys []string) (*Filter, error) {
 
 func (f *Filter) Contains(key string) bool {
 	x := f.xf.Contains(hashKey(key))
-	//log.Printf("Contains(%s) = %v", key, x)
 	return x
 }
 
@@ -66,7 +65,7 @@ func (f *Filter) Marshal() (api.Filter, error) {
 	}
 
 	return api.Filter{
-		Type: FilterType,
+		Type: TypeName,
 		Data: data,
 	}, nil
 }

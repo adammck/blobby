@@ -26,7 +26,7 @@ func TestNew(t *testing.T) {
 	require.NoError(t, err)
 
 	apiFilter := api.Filter{
-		Type: FilterType,
+		Type: TypeName,
 		Data: data,
 	}
 
@@ -72,7 +72,7 @@ func TestMarshal(t *testing.T) {
 
 	apiFilter, err := f.Marshal()
 	require.NoError(t, err)
-	require.Equal(t, FilterType, apiFilter.Type)
+	require.Equal(t, TypeName, apiFilter.Type)
 
 	var unmarshaled []string
 	err = json.Unmarshal(apiFilter.Data, &unmarshaled)
