@@ -6,11 +6,11 @@ import (
 )
 
 type FilterCreator interface {
-	Create(keys []string) (FilterInfo, error)
+	Create(keys []string) (Filter, error)
 }
 
-// FilterInfo encapsulates a filter with its type information
-type FilterInfo struct {
+// Filter encapsulates a filter with its type information
+type Filter struct {
 	// Type identifies the filter algorithm (e.g., "xor", "ribbon", "bloom")
 	Type string `bson:"type"`
 
@@ -24,10 +24,10 @@ type FilterInfo struct {
 // FilterStore defines the interface for storing/retrieving filters
 type FilterStore interface {
 	// Put stores a filter for the given sstable filename
-	Put(ctx context.Context, filename string, filter FilterInfo) error
+	Put(ctx context.Context, filename string, filter Filter) error
 
 	// Get retrieves the filter for the given sstable filename
-	Get(ctx context.Context, filename string) (FilterInfo, error)
+	Get(ctx context.Context, filename string) (Filter, error)
 
 	// Delete deletes the filter for the given sstable filename
 	Delete(ctx context.Context, filename string) error

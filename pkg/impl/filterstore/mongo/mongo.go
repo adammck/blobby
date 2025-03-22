@@ -25,15 +25,15 @@ func New(db *mongo.Database) *FilterStore {
 	}
 }
 
-func (s *FilterStore) Put(ctx context.Context, filename string, filter api.FilterInfo) error {
+func (s *FilterStore) Put(ctx context.Context, filename string, f api.Filter) error {
 	opts := options.Update().SetUpsert(true)
 	_, err := s.db.Collection(collection).UpdateOne(
 		ctx,
 		bson.M{kId: filename},
 		bson.M{"$set": bson.M{
-			"type":    filter.Type,
-			"version": filter.Version,
-			"data":    filter.Data,
+			"type":    f.Type,
+			"version": f.Version,
+			"data":    f.Data,
 		}},
 		opts,
 	)
@@ -43,7 +43,7 @@ func (s *FilterStore) Put(ctx context.Context, filename string, filter api.Filte
 	return nil
 }
 
-func (s *FilterStore) Get(ctx context.Context, filename string) (api.FilterInfo, error) {
+func (s *FilterStore) Get(ctx context.Context, filename string) (api.Filter, error) {
 	var result struct {
 		Type    string `bson:"type"`
 		Version string `bson:"version"`
@@ -53,12 +53,12 @@ func (s *FilterStore) Get(ctx context.Context, filename string) (api.FilterInfo,
 	err := s.db.Collection(collection).FindOne(ctx, bson.M{kId: filename}).Decode(&result)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return api.FilterInfo{}, &api.FilterNotFound{Filename: filename}
+			return api.Filter{}, &api.FilterNotFound{Filename: filename}
 		}
-		return api.FilterInfo{}, fmt.Errorf("FindOne: %w", err)
+		return api.Filter{}, fmt.Errorf("FindOne: %w", err)
 	}
 
-	return api.FilterInfo{
+	return api.Filter{
 		Type:    result.Type,
 		Version: result.Version,
 		Data:    result.Data,

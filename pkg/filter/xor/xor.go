@@ -20,7 +20,7 @@ type Filter struct {
 	xf *xorfilter.BinaryFuse8
 }
 
-func New(f api.FilterInfo) (*Filter, error) {
+func New(f api.Filter) (*Filter, error) {
 	if f.Type != FilterType {
 		return nil, fmt.Errorf("bad type: %s", f.Type)
 	}
@@ -63,13 +63,13 @@ func (f *Filter) Contains(key string) bool {
 	return x
 }
 
-func (f *Filter) Marshal() (api.FilterInfo, error) {
+func (f *Filter) Marshal() (api.Filter, error) {
 	data, err := marshal(f.xf)
 	if err != nil {
-		return api.FilterInfo{}, err
+		return api.Filter{}, err
 	}
 
-	return api.FilterInfo{
+	return api.Filter{
 		Type:    FilterType,
 		Version: FilterVersion,
 		Data:    data,

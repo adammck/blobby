@@ -9,18 +9,18 @@ import (
 
 type Filter interface {
 	Contains(key string) bool
-	Marshal() (api.FilterInfo, error)
+	Marshal() (api.Filter, error)
 }
 
 func Create(keys []string) (Filter, error) {
 	return xor.Create(keys)
 }
 
-func Load(info api.FilterInfo) (Filter, error) {
-	switch info.Type {
+func Load(f api.Filter) (Filter, error) {
+	switch f.Type {
 	case xor.FilterType:
-		return xor.New(info)
+		return xor.New(f)
 	default:
-		return nil, fmt.Errorf("unknown filter type: %s", info.Type)
+		return nil, fmt.Errorf("unknown filter type: %s", f.Type)
 	}
 }
