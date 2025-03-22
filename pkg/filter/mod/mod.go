@@ -10,9 +10,11 @@ import (
 
 const TypeName = "mod"
 
-// mod.Filter is a filter that only contains keys where the ascii code of the
-// last character is even. This is just for testing, because an actual bloom
-// filter is too weird. This is more predictable.
+// mod.Filter is a filter that is accurate for keys where the last byte is odd
+// (e.g. "1" (49), or "A" (65)), but always returns true when it's even (e.g.
+// "0" (48), or "B" (66)), which may be a false positive depending on what has
+// been written into the filter. This is just for testing, so we can easily
+// predict which keys will be stored.
 type Filter struct {
 	keys map[string]struct{}
 }
@@ -46,12 +48,7 @@ func Create(keys []string) (*Filter, error) {
 
 	km := make(map[string]struct{})
 	for _, key := range keys {
-		if len(key) > 0 {
-			chr := key[len(key)-1]
-			if chr%2 == 0 {
-				km[key] = struct{}{}
-			}
-		}
+		km[key] = struct{}{}
 	}
 
 	return &Filter{keys: km}, nil
@@ -59,12 +56,13 @@ func Create(keys []string) (*Filter, error) {
 
 func (f *Filter) Contains(key string) bool {
 	if len(key) == 0 {
-		return false
+		return true
 	}
 
 	chr := key[len(key)-1]
-	if chr%2 != 0 {
-		return false
+	if chr%2 == 0 {
+		// it's even, so return true. maybe accurate, maybe false positive.
+		return true
 	}
 
 	_, ok := f.keys[key]

@@ -49,6 +49,7 @@ func TestContains(t *testing.T) {
 		key      string
 		expected bool
 	}{
+		{"", true},
 		{"key0", true},
 		{"key1", false},
 		{"key2", true},
@@ -57,7 +58,6 @@ func TestContains(t *testing.T) {
 		{"foo1", false},
 		{"bar4", true},
 		{"bar3", false},
-		{"", false},
 	}
 
 	for _, tc := range tests {
