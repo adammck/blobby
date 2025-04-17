@@ -17,6 +17,7 @@ import (
 	"github.com/adammck/blobby/pkg/memtable"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
+	txnpkg "github.com/adammck/blobby/pkg/txn"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -31,13 +32,16 @@ const (
 )
 
 type Blobby struct {
-	mt    *memtable.Memtable
-	bs    *blobstore.Blobstore
-	md    *metadata.Store
-	ixs   api.IndexStore
-	fs    api.FilterStore
-	clock clockwork.Clock
-	comp  *compactor.Compactor
+	mt     *memtable.Memtable
+	bs     *blobstore.Blobstore
+	md     *metadata.Store
+	ixs    api.IndexStore
+	fs     api.FilterStore
+	clock  clockwork.Clock
+	comp   *compactor.Compactor
+	txnMgr *txnpkg.TxnManager
+	txn    *txn.TxnManager
+	txn    *txn.TxnManager
 
 	// index cache
 	indexesMu sync.Mutex
@@ -65,13 +69,14 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, fa
 	bs := blobstore.New(bucket, clock, factory)
 
 	return &Blobby{
-		mt:    memtable.New(mongoURL, clock),
-		bs:    bs,
-		md:    md,
-		ixs:   ixs,
-		fs:    fs,
-		clock: clock,
-		comp:  compactor.New(clock, bs, md, ixs, fs),
+		mt:     memtable.New(mongoURL, clock),
+		bs:     bs,
+		md:     md,
+		ixs:    ixs,
+		fs:     fs,
+		clock:  clock,
+		comp:   compactor.New(clock, bs, md, ixs, fs),
+		txnMgr: txnpkg.NewTxnManager(clock),
 
 		indexes: map[string]*index.Index{},
 		filters: map[string]filter.Filter{},
@@ -123,7 +128,30 @@ func (b *Blobby) Init(ctx context.Context) error {
 }
 
 func (b *Blobby) Put(ctx context.Context, key string, value []byte) (string, error) {
-	return b.mt.Put(ctx, key, value)
+	// Create an implicit transaction for non-transactional writes
+	txID := b.txnMgr.CreateImplicitTransaction()
+
+	// Add to write set
+	_ = b.txnMgr.AddToWriteSet(txID, key)
+
+	// Create record with transaction ID
+	rec := &types.Record{
+		Key:       key,
+		Timestamp: b.clock.Now(),
+		Document:  value,
+		TxID:      txID,
+	}
+
+	// Put the record
+	dest, err := b.mt.PutRecord(ctx, rec)
+	if err != nil {
+		return "", err
+	}
+
+	// Immediately commit implicit transaction
+	_ = b.txnMgr.Commit(txID)
+
+	return dest, nil
 }
 
 // TODO: return the Record, or maybe the timestamp too, not just the value.
@@ -135,9 +163,26 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 		return nil, stats, fmt.Errorf("memtable.Get: %w", err)
 	}
 	if rec != nil {
-		// TODO: Update Memtable.Get to return stats too.
-		stats.Source = src
-		return rec.Document, stats, nil
+		// Check transaction visibility for the record
+		if rec.TxID != "" {
+			status, exists := b.txnMgr.GetStatus(rec.TxID)
+			// Skip records from pending or aborted transactions
+			if !exists || status != txnpkg.StatusCommitted {
+				// Record exists but not visible - continue searching
+				// Fall through to the SSTable search below
+			} else if rec.Tombstone {
+				// This key was deleted by a committed transaction
+				return nil, stats, nil
+			} else {
+				// Record is from a committed transaction and not a tombstone
+				stats.Source = src
+				return rec.Document, stats, nil
+			}
+		} else {
+			// Record has no transaction ID (legacy record), so it's always visible
+			stats.Source = src
+			return rec.Document, stats, nil
+		}
 	}
 
 	metas, err := b.md.GetContaining(ctx, key)
@@ -283,6 +328,24 @@ func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (
 		scanned++
 
 		if rec.Key == key {
+			// Check transaction visibility for records with transaction ID
+			if rec.TxID != "" {
+				status, exists := b.txnMgr.GetStatus(rec.TxID)
+
+				if !exists || status != txnpkg.StatusCommitted {
+					// Skip records from pending or aborted transactions
+					// Continue to next record
+					continue
+				}
+
+				if rec.Tombstone {
+					// This is a tombstone from a committed transaction
+					// The key is definitely deleted, return not found
+					return nil, scanned, nil
+				}
+			}
+
+			// Record found and visible
 			break
 		}
 	}
@@ -292,6 +355,9 @@ func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (
 
 func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 	stats := &api.FlushStats{}
+
+	// Prune old/abandoned transactions before flushing
+	b.txnMgr.PruneOldTransactions()
 
 	// TODO: check whether old sstable is still flushing
 	hPrev, hNext, err := b.mt.Rotate(ctx)

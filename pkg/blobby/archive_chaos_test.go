@@ -24,6 +24,9 @@ var (
 	pPut     = flag.Int("pput", 200, "probability of put")
 	pFlush   = flag.Int("pflush", 10, "probability of flush")
 	pCompact = flag.Int("pcompact", 1, "probability of compaction")
+	pBeginTx = flag.Int("pbegintx", 20, "probability of beginning a transaction")
+	pTxPut   = flag.Int("ptxput", 50, "probability of put in transaction")
+	pCommit  = flag.Int("pcommit", 70, "probability of committing vs aborting transaction")
 
 	pHot  = flag.Int("phot", 50, "probability of hot key")
 	pWarm = flag.Int("pwarm", 30, "probability of warm key")
@@ -32,7 +35,8 @@ var (
 	nHot  = flag.Int("nhot", 10, "number of hot keys")
 	nWarm = flag.Int("nwarm", 90, "number of warm keys")
 	nCold = flag.Int("ncold", 900, "number of cold keys")
-)
+	
+	maxActiveTx = flag.Int("maxtx", 5, "maximum number of active transactions")
 
 func TestMain(m *testing.M) {
 	flag.Parse()
@@ -48,12 +52,16 @@ type chaosTestConfig struct {
 	pPut      int
 	pFlush    int
 	pCompact  int
+	pBeginTx  int
+	pTxPut    int
+	pCommit   int
 	pHot      int
 	pWarm     int
 	pCold     int
 	nHot      int
 	nWarm     int
 	nCold     int
+	maxTx     int
 }
 
 func configFromFlags() chaosTestConfig {
@@ -65,12 +73,16 @@ func configFromFlags() chaosTestConfig {
 		pPut:      *pPut,
 		pFlush:    *pFlush,
 		pCompact:  *pCompact,
+		pBeginTx:  *pBeginTx,
+		pTxPut:    *pTxPut,
+		pCommit:   *pCommit,
 		pHot:      *pHot,
 		pWarm:     *pWarm,
 		pCold:     *pCold,
 		nHot:      *nHot,
 		nWarm:     *nWarm,
 		nCold:     *nCold,
+		maxTx:     *maxActiveTx,
 	}
 }
 
@@ -84,37 +96,77 @@ func TestChaos(t *testing.T) {
 }
 
 func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestConfig) {
-	th := testutil.NewHarness(b)
+	baseHarness := testutil.NewHarness(b)
+	txh := testutil.NewTxHarness(baseHarness)
 	rnd := getRand(t, int64(cfg.seed))
 
 	t.Log("Creating initial dataset...")
 	for i := range cfg.initCount {
 		key := fmt.Sprintf("key-%04d", i)
 		val := fmt.Appendf(nil, "value-%04d-v1", i)
-		err := th.Put(key, val).Run(t, ctx)
+		err := baseHarness.Put(key, val).Run(t, ctx)
 		require.NoError(t, err)
 	}
 
 	t.Logf("Spamming %d random ops....", cfg.numOps)
-	totalOps := cfg.pGet + cfg.pPut + cfg.pFlush + cfg.pCompact
+	totalOps := cfg.pGet + cfg.pPut + cfg.pFlush + cfg.pCompact + cfg.pBeginTx + cfg.pTxPut
 	for i := range cfg.numOps {
 		var op testutil.Op
 		p := rnd.Intn(totalOps)
 
 		switch {
 		case p < cfg.pGet:
-			op = th.Get(selectKey(cfg, rnd))
+			op = baseHarness.Get(selectKey(cfg, rnd))
 
 		case p < cfg.pGet+cfg.pPut:
 			key := selectKey(cfg, rnd)
 			val := fmt.Appendf(nil, "value-%s-v%05d-r%d", key, i, rnd.Int())
-			op = th.Put(key, val)
+			op = baseHarness.Put(key, val)
+			
+		case p < cfg.pGet+cfg.pPut+cfg.pBeginTx:
+			// Only begin new transactions if we're under the max limit
+			if txh.NumActiveTx() < cfg.maxTx {
+				op = txh.BeginTx()
+				baseHarness.stats.TxBegin++
+			} else {
+				// Skip this operation
+				continue
+			}
+			
+		case p < cfg.pGet+cfg.pPut+cfg.pBeginTx+cfg.pTxPut:
+			// Only do transaction puts if there are active transactions
+			if activeTxs := txh.GetActiveTxIDs(); len(activeTxs) > 0 {
+				// Choose a random active transaction
+				txID := activeTxs[rnd.Intn(len(activeTxs))]
+				key := selectKey(cfg, rnd)
+				val := fmt.Appendf(nil, "tx-%s-value-%s-v%05d-r%d", txID, key, i, rnd.Int())
+				op = txh.PutInTx(txID, key, val)
+				baseHarness.stats.TxPuts++
+			} else {
+				// Skip this operation
+				continue
+			}
+			
+		case p < cfg.pGet+cfg.pPut+cfg.pBeginTx+cfg.pTxPut+cfg.pFlush:
+			op = baseHarness.Flush()
 
-		case p < cfg.pGet+cfg.pPut+cfg.pFlush:
-			op = th.Flush()
-
+		case p < cfg.pGet+cfg.pPut+cfg.pBeginTx+cfg.pTxPut+cfg.pFlush+cfg.pCompact:
+			op = baseHarness.Compact()
+			
 		default:
-			op = th.Compact()
+			// End an existing transaction (commit or abort)
+			if activeTxs := txh.GetActiveTxIDs(); len(activeTxs) > 0 {
+				txID := activeTxs[rnd.Intn(len(activeTxs))]
+				// Decide whether to commit or abort based on pCommit probability
+				if rnd.Intn(100) < cfg.pCommit {
+					op = txh.CommitTx(txID)
+				} else {
+					op = txh.AbortTx(txID)
+				}
+			} else {
+				// Skip this operation
+				continue
+			}
 		}
 
 		err := op.Run(t, ctx)

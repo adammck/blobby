@@ -84,6 +84,10 @@ type Stats struct {
 	BlobsSkipped        uint64
 	TotalRecordsScanned uint64
 	MaxRecordsScanned   uint64
+	TxBegin             uint64
+	TxCommit            uint64
+	TxAbort             uint64
+	TxPuts              uint64
 }
 
 func (s *Stats) Incr(stats *api.GetStats) {

@@ -108,4 +108,10 @@ type Blobby interface {
 	Get(ctx context.Context, key string) ([]byte, *GetStats, error)
 	Flush(ctx context.Context) (*FlushStats, error)
 	Compact(ctx context.Context, opts CompactionOptions) ([]*CompactionStats, error)
+
+	// Transaction-related methods
+	BeginTransaction(ctx context.Context) (string, error)
+	PutInTransaction(ctx context.Context, txID string, key string, value []byte) (string, error)
+	CommitTransaction(ctx context.Context, txID string) error
+	AbortTransaction(ctx context.Context, txID string) error
 }
