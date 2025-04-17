@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
@@ -164,7 +165,7 @@ type testStats struct {
 	maxRecordsScanned   uint64
 }
 
-func (s *testStats) incr(stats *GetStats) {
+func (s *testStats) incr(stats *api.GetStats) {
 	s.numGets += 1
 	s.blobsFetched += uint64(stats.BlobsFetched)
 	s.blobsSkipped += uint64(stats.BlobsSkipped)
@@ -275,7 +276,7 @@ func (o compactOp) String() string {
 }
 
 func (o compactOp) run(t *testing.T, ctx context.Context, b *Blobby, state *testState) error {
-	stats, err := b.Compact(ctx, CompactionOptions{})
+	stats, err := b.Compact(ctx, api.CompactionOptions{})
 	if err != nil {
 		return fmt.Errorf("compact: %v", err)
 	}

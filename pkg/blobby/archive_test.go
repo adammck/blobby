@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adammck/blobby/pkg/compactor"
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/adammck/blobby/pkg/testdeps"
 	"github.com/jonboulle/clockwork"
@@ -69,7 +69,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// because we haven't flushed anything.
 	val, gstats := tb.get("001")
 	require.Equal(t, val, docs["001"])
-	require.Equal(t, &GetStats{
+	require.Equal(t, &api.GetStats{
 		Source:         t1.memtable,
 		BlobsFetched:   0,
 		RecordsScanned: 0,
@@ -83,11 +83,11 @@ func TestBasicWriteRead(t *testing.T) {
 	t2 := tb.now()
 	fstats, err := b.Flush(ctx)
 	require.NoError(t, err)
-	require.Equal(t, &FlushStats{
+	require.Equal(t, &api.FlushStats{
 		FlushedMemtable: t1.memtable,
 		ActiveMemtable:  t2.memtable,
 		BlobName:        t2.sstable,
-		Meta: &sstable.Meta{
+		Meta: &api.BlobMeta{
 			MinKey:  "001",
 			MaxKey:  "010",
 			MinTime: t1.t.Add(15 * time.Millisecond),
@@ -101,7 +101,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// fetch the same key, and see that it's now read from the blobstore.
 	val, gstats = tb.get("001")
 	require.Equal(t, val, docs["001"])
-	require.Equal(t, &GetStats{
+	require.Equal(t, &api.GetStats{
 		Source:         t2.sstable,
 		BlobsFetched:   1,
 		RecordsScanned: 1,
@@ -125,7 +125,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// fetch one of the new keys. it's in the second memtable.
 	val, gstats = tb.get("015")
 	require.Equal(t, val, docs["015"])
-	require.Equal(t, &GetStats{
+	require.Equal(t, &api.GetStats{
 		Source: t2.memtable,
 	}, gstats)
 
@@ -138,11 +138,11 @@ func TestBasicWriteRead(t *testing.T) {
 	t3 := tb.now()
 	fstats, err = b.Flush(ctx)
 	require.NoError(t, err)
-	require.Equal(t, &FlushStats{
+	require.Equal(t, &api.FlushStats{
 		FlushedMemtable: t2.memtable,
 		ActiveMemtable:  t3.memtable,
 		BlobName:        t3.sstable,
-		Meta: &sstable.Meta{
+		Meta: &api.BlobMeta{
 			MinKey:  "011",
 			MaxKey:  "020",
 			MinTime: t2.t.Add(15 * time.Millisecond),
@@ -157,14 +157,14 @@ func TestBasicWriteRead(t *testing.T) {
 	// we only needed to fetch one of them for each get.
 	val, gstats = tb.get("002")
 	require.Equal(t, val, docs["002"])
-	require.Equal(t, &GetStats{
+	require.Equal(t, &api.GetStats{
 		Source:         t2.sstable,
 		BlobsFetched:   1,
 		RecordsScanned: 2,
 	}, gstats)
 	val, gstats = tb.get("014")
 	require.Equal(t, val, docs["014"])
-	require.Equal(t, &GetStats{
+	require.Equal(t, &api.GetStats{
 		Source:         t3.sstable,
 		BlobsFetched:   1,
 		RecordsScanned: 4,
@@ -186,12 +186,12 @@ func TestBasicWriteRead(t *testing.T) {
 	// new values back. the values in the sstables are masked.
 	val, gstats = tb.get("003")
 	require.Equal(t, val, []byte("xxx"))
-	require.Equal(t, &GetStats{
+	require.Equal(t, &api.GetStats{
 		Source: t3.memtable,
 	}, gstats)
 	val, gstats = tb.get("013")
 	require.Equal(t, val, []byte("yyy"))
-	require.Equal(t, &GetStats{
+	require.Equal(t, &api.GetStats{
 		Source: t3.memtable,
 	}, gstats)
 
@@ -200,11 +200,11 @@ func TestBasicWriteRead(t *testing.T) {
 	t4 := tb.now()
 	fstats, err = b.Flush(ctx)
 	require.NoError(t, err)
-	require.Equal(t, &FlushStats{
+	require.Equal(t, &api.FlushStats{
 		FlushedMemtable: t3.memtable,
 		ActiveMemtable:  t4.memtable,
 		BlobName:        t4.sstable,
-		Meta: &sstable.Meta{
+		Meta: &api.BlobMeta{
 			MinKey:  "003",
 			MaxKey:  "013",
 			MinTime: t3.t.Add(15 * time.Millisecond),
@@ -226,7 +226,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// present.
 	val, gstats = tb.get("003")
 	require.Equal(t, val, []byte("xxx"))
-	require.Equal(t, &GetStats{
+	require.Equal(t, &api.GetStats{
 		Source:         t4.sstable,
 		BlobsFetched:   1, // <--
 		RecordsScanned: 1,
@@ -236,7 +236,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// range of the sstable we just wrote. we can still do this in one fetch.
 	val, gstats = tb.get("002")
 	require.Equal(t, val, docs["002"])
-	require.Equal(t, &GetStats{
+	require.Equal(t, &api.GetStats{
 		Source:         t2.sstable,
 		BlobsFetched:   1, // <--
 		RecordsScanned: 2,
@@ -252,7 +252,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// skip some.
 	val, gstats = tb.get("012")
 	require.Equal(t, val, docs["012"])
-	require.Equal(t, &GetStats{
+	require.Equal(t, &api.GetStats{
 		Source:         t3.sstable,
 		BlobsFetched:   2, // <--
 		BlobsSkipped:   0,
@@ -264,11 +264,11 @@ func TestBasicWriteRead(t *testing.T) {
 	// perform a full compaction. every sstable merged into one.
 	c.Advance(1 * time.Hour)
 	t5 := tb.now()
-	cstats, err := b.Compact(ctx, CompactionOptions{})
+	cstats, err := b.Compact(ctx, api.CompactionOptions{})
 	require.NoError(t, err)
 	require.Len(t, cstats, 1)
 	require.NoError(t, cstats[0].Error)
-	require.Equal(t, []*sstable.Meta{
+	require.Equal(t, []*api.BlobMeta{
 		{
 			MinKey:  "001",
 			MaxKey:  "020",
@@ -291,7 +291,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// fetched and scanned.
 	val, gstats = tb.get("003")
 	require.Equal(t, []byte("xxx"), val)
-	require.Equal(t, &GetStats{
+	require.Equal(t, &api.GetStats{
 		Source:         t5.sstable,
 		BlobsFetched:   1,
 		RecordsScanned: 3,
@@ -302,7 +302,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// straight to record 008.
 	val, gstats = tb.get("013")
 	require.Equal(t, []byte("yyy"), val)
-	require.Equal(t, &GetStats{
+	require.Equal(t, &api.GetStats{
 		Source:         t5.sstable,
 		BlobsFetched:   1,
 		RecordsScanned: 6,
@@ -364,8 +364,8 @@ func TestBasicWriteRead(t *testing.T) {
 	// compact only the two newest files together
 	c.Advance(1 * time.Hour)
 	t9 := tb.now()
-	cstats, err = b.Compact(ctx, CompactionOptions{
-		Order:    compactor.NewestFirst,
+	cstats, err = b.Compact(ctx, api.CompactionOptions{
+		Order:    api.NewestFirst,
 		MaxFiles: 2,
 	})
 	require.NoError(t, err)
@@ -379,7 +379,7 @@ func TestBasicWriteRead(t *testing.T) {
 
 	// verify output metadata
 	require.Len(t, cstats[0].Outputs, 1)
-	require.Equal(t, &sstable.Meta{
+	require.Equal(t, &api.BlobMeta{
 		MinKey:  "201",
 		MaxKey:  "302",
 		MinTime: t6.t.Add(15 * time.Millisecond * 1),
@@ -392,7 +392,7 @@ func TestBasicWriteRead(t *testing.T) {
 	// verify we can read from the newly compacted file
 	val, gstats = tb.get("301")
 	require.Equal(t, []byte("c1"), val)
-	require.Equal(t, &GetStats{
+	require.Equal(t, &api.GetStats{
 		Source:         t9.sstable,
 		BlobsFetched:   1,
 		RecordsScanned: 3,
@@ -429,7 +429,7 @@ func (ta *testBlobby) put(key string, val []byte) string {
 	return dest
 }
 
-func (ta *testBlobby) get(key string) ([]byte, *GetStats) {
+func (ta *testBlobby) get(key string) ([]byte, *api.GetStats) {
 	val, stats, err := ta.b.Get(ta.ctx, key)
 	require.NoError(ta.t, err)
 	return val, stats

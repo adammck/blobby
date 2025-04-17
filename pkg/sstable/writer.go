@@ -79,7 +79,7 @@ func (w *Writer) Add(record *types.Record) error {
 
 // Write writes the SSTable to the given writer, and returns the corresponding
 // index entries which should be persited somewhere via an IndexStore.
-func (w *Writer) Write(out io.Writer) (*Meta, []api.IndexEntry, filter.Filter, error) {
+func (w *Writer) Write(out io.Writer) (*api.BlobMeta, []api.IndexEntry, filter.Filter, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -101,7 +101,7 @@ func (w *Writer) Write(out io.Writer) (*Meta, []api.IndexEntry, filter.Filter, e
 		return nil, nil, nil, err
 	}
 
-	m := &Meta{
+	m := &api.BlobMeta{
 		Created: w.clock.Now(),
 		Size:    int64(n),
 	}

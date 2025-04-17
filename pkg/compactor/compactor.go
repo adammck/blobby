@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"time"
 
 	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/blobstore"
@@ -36,77 +35,7 @@ func New(clock clockwork.Clock, bs *blobstore.Blobstore, md *metadata.Store, ixs
 	}
 }
 
-type CompactionOrder int
-
-const (
-	// OldestFirst considers files from oldest to newest, in terms of the
-	// creation time, not the timestamps of the records it contains. This is
-	// useful when old files are likely to contain data which can be expired.
-	OldestFirst CompactionOrder = iota
-
-	// NewestFirst considers files from newest to oldest. This is useful when
-	// files are created rapidly, and should be compacted together regularly.
-	// Should usually be combined with MinTime and/or MaxSize.
-	NewestFirst
-
-	// SmallestFirst considers files from smallest to largest. This is useful
-	// when the overhead of having or touching many files is high, and we wish
-	// to reduce the number of them.
-	SmallestFirst
-
-	// LargestFirst considers files from largest to smallest. Like OldestFirst,
-	// this is most useful when looking for data to delete, or when scanning is
-	// expensive and we want to repartition files.
-	LargestFirst
-)
-
-type CompactionOptions struct {
-	// Order specifies the order in which files should be considered for
-	// compaction. The default is OldestFirst.
-	Order CompactionOrder
-
-	// MinTime specifies the minimum Timestamp of record which we want to
-	// compact. Files containing only records older than this will be ignored.
-	// Note that this does not affect time partioning of the output files.
-	MinTime time.Time
-
-	// MaxTime specifies the maximum Timestamp of record which we want to
-	// compact. Files containing only records newer than this will be ignored.
-	// Note that this does not affect time partioning of the output files.
-	MaxTime time.Time
-
-	// MinInputSize specifies the minimum total number of bytes which we will
-	// compact. This is to avoid scheduling tiny compactions which are a waste
-	// of time.
-	MinInputSize int64
-
-	// MaxInputSize specifies the maximum total number of bytes which we will
-	// compact. This is to avoid scheduling huge compactions which take forever
-	// or never complete.
-	MaxInputSize int64
-
-	// MinFiles specifies the minimum number of files which we will compact at
-	// once. I'm not sure why this is here. Prefer MinInputSize.
-	MinFiles int
-
-	// MaxFiles specifies the maximum number of files which we will compact at
-	// once. This is mostly to avoid shuffling too much metadata around.
-	MaxFiles int
-
-	// only compact a subset of the keyspace?
-	//MinKey string
-	//MaxKey string
-}
-
-type CompactionStats struct {
-	Inputs  []*sstable.Meta
-	Outputs []*sstable.Meta
-
-	// Contains an error if the comnpaction failed.
-	Error error
-}
-
-func (c *Compactor) Run(ctx context.Context, opts CompactionOptions) ([]*CompactionStats, error) {
+func (c *Compactor) Run(ctx context.Context, opts api.CompactionOptions) ([]*api.CompactionStats, error) {
 
 	// grab *all* metadata for now, and do the selection in-process.
 	// TODO: push down as much as we can to the mongo query.
@@ -118,7 +47,7 @@ func (c *Compactor) Run(ctx context.Context, opts CompactionOptions) ([]*Compact
 	// get the list of blobs eligibile for compactions right now.
 	compactions := c.GetCompactions(metas, opts)
 
-	stats := []*CompactionStats{}
+	stats := []*api.CompactionStats{}
 	for _, cc := range compactions {
 		s := c.Compact(ctx, cc)
 		stats = append(stats, s)
@@ -127,8 +56,8 @@ func (c *Compactor) Run(ctx context.Context, opts CompactionOptions) ([]*Compact
 	return stats, nil
 }
 
-func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStats {
-	stats := &CompactionStats{
+func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.CompactionStats {
+	stats := &api.CompactionStats{
 		Inputs: cc.Inputs,
 	}
 
@@ -172,7 +101,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 		return nil
 	})
 
-	var meta *sstable.Meta
+	var meta *api.BlobMeta
 	var idx []api.IndexEntry
 	var f filter.Filter
 
@@ -187,25 +116,25 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 
 	err := g.Wait()
 	if err != nil {
-		return &CompactionStats{
+		return &api.CompactionStats{
 			Error: fmt.Errorf("g.Wait: %w", err),
 		}
 	}
 
-	stats.Outputs = []*sstable.Meta{meta}
+	stats.Outputs = []*api.BlobMeta{meta}
 
 	// TODO: Do the inserts and deletes transactionally!
 
 	err = c.md.Insert(ctx, meta)
 	if err != nil {
-		return &CompactionStats{
+		return &api.CompactionStats{
 			Error: fmt.Errorf("metadata.Insert: %w", err),
 		}
 	}
 
 	err = c.ixs.Put(ctx, meta.Filename(), idx)
 	if err != nil {
-		return &CompactionStats{
+		return &api.CompactionStats{
 			Error: fmt.Errorf("IndexStore.Put: %w", err),
 		}
 	}
@@ -214,7 +143,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 	fi, err := f.Marshal()
 	if err != nil {
 		// TODO: roll back everything, or maybe do this above.
-		return &CompactionStats{
+		return &api.CompactionStats{
 			Error: fmt.Errorf("Filter.Marshal: %w", err),
 		}
 	}
@@ -223,7 +152,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 	err = c.fs.Put(ctx, meta.Filename(), fi)
 	if err != nil {
 		// TODO: roll back metadata insert
-		return &CompactionStats{
+		return &api.CompactionStats{
 			Error: fmt.Errorf("FilterStore.Put: %w", err),
 		}
 	}
@@ -234,7 +163,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 	for i, m := range cc.Inputs {
 		err = c.md.Delete(ctx, m)
 		if err != nil {
-			return &CompactionStats{
+			return &api.CompactionStats{
 				// TODO: include the metadata ID in this error.
 				Error: fmt.Errorf("metadata.Delete(%d): %w", i, err),
 			}
@@ -246,7 +175,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 	for _, m := range cc.Inputs {
 		c.bs.Delete(ctx, m.Filename())
 		if err != nil {
-			return &CompactionStats{
+			return &api.CompactionStats{
 				Error: fmt.Errorf("blobstore.Delete(%s): %w", m.Filename(), err),
 			}
 		}
@@ -256,10 +185,10 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *CompactionStat
 }
 
 type Compaction struct {
-	Inputs []*sstable.Meta
+	Inputs []*api.BlobMeta
 }
 
-func (c *Compactor) GetCompactions(metas []*sstable.Meta, opts CompactionOptions) []*Compaction {
+func (c *Compactor) GetCompactions(metas []*api.BlobMeta, opts api.CompactionOptions) []*Compaction {
 	r := &Compaction{}
 	var tot int64
 
@@ -269,7 +198,7 @@ func (c *Compactor) GetCompactions(metas []*sstable.Meta, opts CompactionOptions
 	}
 
 	// copy the param to avoid mutating during sort.
-	smetas := make([]*sstable.Meta, len(metas))
+	smetas := make([]*api.BlobMeta, len(metas))
 	copy(smetas, metas)
 	metas = nil
 
@@ -277,13 +206,13 @@ func (c *Compactor) GetCompactions(metas []*sstable.Meta, opts CompactionOptions
 	// TODO: move these into separate functions.
 	sort.Slice(smetas, func(i, j int) bool {
 		switch opts.Order {
-		case OldestFirst:
+		case api.OldestFirst:
 			return smetas[i].Created.Before(smetas[j].Created)
-		case NewestFirst:
+		case api.NewestFirst:
 			return smetas[j].Created.Before(smetas[i].Created)
-		case SmallestFirst:
+		case api.SmallestFirst:
 			return smetas[i].Size < smetas[j].Size
-		case LargestFirst:
+		case api.LargestFirst:
 			return smetas[i].Size > smetas[j].Size
 		default:
 			panic(fmt.Sprintf("invalid sort order: %v", opts.Order))
