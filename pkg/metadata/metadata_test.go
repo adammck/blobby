@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adammck/blobby/pkg/sstable"
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/testdeps"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,7 +46,7 @@ func TestEmpty(t *testing.T) {
 func TestBasicUsage(t *testing.T) {
 	ctx, store := setup(t)
 
-	m1 := &sstable.Meta{
+	m1 := &api.BlobMeta{
 		MinKey:  "a",
 		MaxKey:  "c",
 		MinTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -76,7 +76,7 @@ func TestSortByMaxTime(t *testing.T) {
 	ctx, store := setup(t)
 
 	now := time.Now().UTC()
-	m1 := &sstable.Meta{
+	m1 := &api.BlobMeta{
 		MinKey:  "a",
 		MaxKey:  "c",
 		MinTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -88,7 +88,7 @@ func TestSortByMaxTime(t *testing.T) {
 	err := store.Insert(ctx, m1)
 	require.NoError(t, err)
 
-	m2 := &sstable.Meta{
+	m2 := &api.BlobMeta{
 		MinKey:  "b",
 		MaxKey:  "d",
 		MinTime: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC),
@@ -114,7 +114,7 @@ func TestSortByCreatedForSameMaxTime(t *testing.T) {
 	now := time.Now().UTC()
 	sameTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	m1 := &sstable.Meta{
+	m1 := &api.BlobMeta{
 		MinKey:  "a",
 		MaxKey:  "c",
 		MinTime: sameTime,
@@ -126,7 +126,7 @@ func TestSortByCreatedForSameMaxTime(t *testing.T) {
 	err := store.Insert(ctx, m1)
 	require.NoError(t, err)
 
-	m2 := &sstable.Meta{
+	m2 := &api.BlobMeta{
 		MinKey:  "b",
 		MaxKey:  "d",
 		MinTime: sameTime,
@@ -150,7 +150,7 @@ func TestBoundaryCases(t *testing.T) {
 	ctx, store := setup(t)
 
 	now := time.Now().UTC()
-	m1 := &sstable.Meta{
+	m1 := &api.BlobMeta{
 		MinKey:  "m",
 		MaxKey:  "n",
 		MinTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),

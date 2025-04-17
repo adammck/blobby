@@ -10,8 +10,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/blobby"
-	"github.com/adammck/blobby/pkg/compactor"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/jonboulle/clockwork"
 	"go.mongodb.org/mongo-driver/bson"
@@ -87,20 +87,20 @@ func cmdCompact(ctx context.Context, b *blobby.Blobby, bucket string) {
 
 	flags.Parse(os.Args[2:])
 
-	opts := compactor.CompactionOptions{
+	opts := api.CompactionOptions{
 		MinFiles: cf.minFiles,
 		MaxFiles: cf.maxFiles,
 	}
 
 	switch cf.order {
 	case "oldest-first":
-		opts.Order = compactor.OldestFirst
+		opts.Order = api.OldestFirst
 	case "newest-first":
-		opts.Order = compactor.NewestFirst
+		opts.Order = api.NewestFirst
 	case "smallest-first":
-		opts.Order = compactor.SmallestFirst
+		opts.Order = api.SmallestFirst
 	case "largest-first":
-		opts.Order = compactor.LargestFirst
+		opts.Order = api.LargestFirst
 	default:
 		log.Fatalf("Invalid order: %s", cf.order)
 	}

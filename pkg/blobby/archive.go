@@ -48,6 +48,8 @@ type Blobby struct {
 	filters   map[string]filter.Filter
 }
 
+var _ api.Blobby = (*Blobby)(nil)
+
 func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, factory sstable.Factory) *Blobby {
 	db, err := connectToMongo(ctx, mongoURL)
 	if err != nil {
@@ -124,16 +126,9 @@ func (b *Blobby) Put(ctx context.Context, key string, value []byte) (string, err
 	return b.mt.Put(ctx, key, value)
 }
 
-type GetStats struct {
-	Source         string
-	BlobsFetched   int
-	BlobsSkipped   int
-	RecordsScanned int
-}
-
 // TODO: return the Record, or maybe the timestamp too, not just the value.
-func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *GetStats, err error) {
-	stats = &GetStats{}
+func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.GetStats, err error) {
+	stats = &api.GetStats{}
 
 	rec, src, err := b.mt.Get(ctx, key)
 	if err != nil && !errors.Is(err, &memtable.NotFound{}) {
@@ -295,23 +290,8 @@ func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (
 	return rec, scanned, nil
 }
 
-type FlushStats struct {
-
-	// The URL of the memtable which was flushed.
-	FlushedMemtable string
-
-	// The name of the memtable that is now active, after the flush.
-	ActiveMemtable string
-
-	// The key of the flushed sstable in the blobstore.
-	BlobName string
-
-	// Metadata about the flushed sstable.
-	Meta *sstable.Meta
-}
-
-func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
-	stats := &FlushStats{}
+func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
+	stats := &api.FlushStats{}
 
 	// TODO: check whether old sstable is still flushing
 	hPrev, hNext, err := b.mt.Rotate(ctx)
@@ -333,7 +313,7 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 	})
 
 	var dest string
-	var meta *sstable.Meta
+	var meta *api.BlobMeta
 	var idx []api.IndexEntry
 	var f filter.Filter
 
@@ -390,9 +370,6 @@ func (b *Blobby) Flush(ctx context.Context) (*FlushStats, error) {
 	return stats, nil
 }
 
-type CompactionStats = compactor.CompactionStats
-type CompactionOptions = compactor.CompactionOptions
-
-func (b *Blobby) Compact(ctx context.Context, opts CompactionOptions) ([]*CompactionStats, error) {
+func (b *Blobby) Compact(ctx context.Context, opts api.CompactionOptions) ([]*api.CompactionStats, error) {
 	return b.comp.Run(ctx, opts)
 }

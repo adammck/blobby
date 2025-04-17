@@ -1,11 +1,11 @@
-package sstable
+package api
 
 import (
 	"fmt"
 	"time"
 )
 
-type Meta struct {
+type BlobMeta struct {
 	MinKey  string    `bson:"min_key"`
 	MaxKey  string    `bson:"max_key"`
 	MinTime time.Time `bson:"min_time"`
@@ -24,6 +24,6 @@ type Meta struct {
 
 // Filename returns the filename of this sstable. It happens to be based on the
 // creation time, but it should be considered opaque.
-func (m *Meta) Filename() string {
+func (m *BlobMeta) Filename() string {
 	return fmt.Sprintf("%d.sstable", m.Created.UnixMilli())
 }

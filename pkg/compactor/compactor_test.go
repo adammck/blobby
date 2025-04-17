@@ -4,29 +4,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adammck/blobby/pkg/sstable"
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGetCompactionsEmpty(t *testing.T) {
 	c := &Compactor{}
-	opts := CompactionOptions{
+	opts := api.CompactionOptions{
 		MinFiles: 2,
 	}
-	compactions := c.GetCompactions([]*sstable.Meta{}, opts)
+	compactions := c.GetCompactions([]*api.BlobMeta{}, opts)
 	require.Empty(t, compactions)
 }
 
 func TestGetCompactionsNotEnoughFiles(t *testing.T) {
 	c := &Compactor{}
-	opts := CompactionOptions{
+	opts := api.CompactionOptions{
 		MinFiles: 2,
 	}
-	meta := &sstable.Meta{
+	meta := &api.BlobMeta{
 		Created: time.Now(),
 		Size:    100,
 	}
-	compactions := c.GetCompactions([]*sstable.Meta{meta}, opts)
+	compactions := c.GetCompactions([]*api.BlobMeta{meta}, opts)
 	require.Empty(t, compactions)
 }
 
@@ -34,14 +34,14 @@ func TestGetCompactionsOldestFirst(t *testing.T) {
 	c := &Compactor{}
 	now := time.Now()
 
-	metas := []*sstable.Meta{
+	metas := []*api.BlobMeta{
 		{Created: now.Add(-2 * time.Hour), Size: 100},
 		{Created: now.Add(-1 * time.Hour), Size: 100},
 		{Created: now, Size: 100},
 	}
 
-	opts := CompactionOptions{
-		Order:    OldestFirst,
+	opts := api.CompactionOptions{
+		Order:    api.OldestFirst,
 		MinFiles: 2,
 	}
 
@@ -56,14 +56,14 @@ func TestGetCompactionsNewestFirst(t *testing.T) {
 	c := &Compactor{}
 	now := time.Now()
 
-	metas := []*sstable.Meta{
+	metas := []*api.BlobMeta{
 		{Created: now.Add(-2 * time.Hour), Size: 100},
 		{Created: now.Add(-1 * time.Hour), Size: 100},
 		{Created: now, Size: 100},
 	}
 
-	opts := CompactionOptions{
-		Order:    NewestFirst,
+	opts := api.CompactionOptions{
+		Order:    api.NewestFirst,
 		MinFiles: 2,
 	}
 
@@ -78,14 +78,14 @@ func TestGetCompactionsSmallestFirst(t *testing.T) {
 	c := &Compactor{}
 	now := time.Now()
 
-	metas := []*sstable.Meta{
+	metas := []*api.BlobMeta{
 		{Created: now, Size: 300},
 		{Created: now, Size: 100},
 		{Created: now, Size: 200},
 	}
 
-	opts := CompactionOptions{
-		Order:    SmallestFirst,
+	opts := api.CompactionOptions{
+		Order:    api.SmallestFirst,
 		MinFiles: 2,
 	}
 
@@ -100,14 +100,14 @@ func TestGetCompactionsLargestFirst(t *testing.T) {
 	c := &Compactor{}
 	now := time.Now()
 
-	metas := []*sstable.Meta{
+	metas := []*api.BlobMeta{
 		{Created: now, Size: 300},
 		{Created: now, Size: 100},
 		{Created: now, Size: 200},
 	}
 
-	opts := CompactionOptions{
-		Order:    LargestFirst,
+	opts := api.CompactionOptions{
+		Order:    api.LargestFirst,
 		MinFiles: 2,
 	}
 
@@ -122,15 +122,15 @@ func TestGetCompactionsMaxFiles(t *testing.T) {
 	c := &Compactor{}
 	now := time.Now()
 
-	metas := []*sstable.Meta{
+	metas := []*api.BlobMeta{
 		{Created: now.Add(-3 * time.Hour), Size: 100},
 		{Created: now.Add(-2 * time.Hour), Size: 100},
 		{Created: now.Add(-1 * time.Hour), Size: 100},
 		{Created: now, Size: 100},
 	}
 
-	opts := CompactionOptions{
-		Order:    OldestFirst,
+	opts := api.CompactionOptions{
+		Order:    api.OldestFirst,
 		MinFiles: 2,
 		MaxFiles: 3,
 	}
@@ -144,14 +144,14 @@ func TestGetCompactionsMaxInputSize(t *testing.T) {
 	c := &Compactor{}
 	now := time.Now()
 
-	metas := []*sstable.Meta{
+	metas := []*api.BlobMeta{
 		{Created: now.Add(-2 * time.Hour), Size: 100},
 		{Created: now.Add(-1 * time.Hour), Size: 100},
 		{Created: now, Size: 100},
 	}
 
-	opts := CompactionOptions{
-		Order:        OldestFirst,
+	opts := api.CompactionOptions{
+		Order:        api.OldestFirst,
 		MinFiles:     2,
 		MaxInputSize: 250,
 	}
@@ -165,14 +165,14 @@ func TestGetCompactionsMinInputSize(t *testing.T) {
 	c := &Compactor{}
 	now := time.Now()
 
-	metas := []*sstable.Meta{
+	metas := []*api.BlobMeta{
 		{Created: now.Add(-2 * time.Hour), Size: 100},
 		{Created: now.Add(-1 * time.Hour), Size: 100},
 		{Created: now, Size: 100},
 	}
 
-	opts := CompactionOptions{
-		Order:        OldestFirst,
+	opts := api.CompactionOptions{
+		Order:        api.OldestFirst,
 		MinFiles:     2,
 		MinInputSize: 400,
 	}
@@ -185,7 +185,7 @@ func TestGetCompactionsTimeFilter(t *testing.T) {
 	c := &Compactor{}
 	now := time.Now()
 
-	metas := []*sstable.Meta{
+	metas := []*api.BlobMeta{
 		{
 			Created: now.Add(-3 * time.Hour),
 			Size:    100,
@@ -212,8 +212,8 @@ func TestGetCompactionsTimeFilter(t *testing.T) {
 		},
 	}
 
-	opts := CompactionOptions{
-		Order:    OldestFirst,
+	opts := api.CompactionOptions{
+		Order:    api.OldestFirst,
 		MinFiles: 2,
 		MinTime:  now.Add(-3 * time.Hour),
 		MaxTime:  now,
