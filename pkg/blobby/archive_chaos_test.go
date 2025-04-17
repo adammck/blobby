@@ -2,7 +2,6 @@ package blobby
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -10,8 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/adammck/blobby/pkg/api"
-	"github.com/adammck/blobby/pkg/blobstore"
+	"github.com/adammck/blobby/pkg/blobby/testutil"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 )
@@ -86,99 +84,49 @@ func TestChaos(t *testing.T) {
 }
 
 func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestConfig) {
-	state := &testState{
-		values: make(map[string][]byte),
-	}
-
+	th := testutil.NewHarness(b)
 	rnd := getRand(t, int64(cfg.seed))
 
 	t.Log("Creating initial dataset...")
 	for i := range cfg.initCount {
 		key := fmt.Sprintf("key-%04d", i)
 		val := fmt.Appendf(nil, "value-%04d-v1", i)
-		err := putOp{key: key, value: val}.run(t, ctx, b, state)
+		err := th.Put(key, val).Run(t, ctx)
 		require.NoError(t, err)
 	}
 
 	t.Logf("Spamming %d random ops....", cfg.numOps)
 	totalOps := cfg.pGet + cfg.pPut + cfg.pFlush + cfg.pCompact
 	for i := range cfg.numOps {
-		var op operation
+		var op testutil.Op
 		p := rnd.Intn(totalOps)
 
 		switch {
 		case p < cfg.pGet:
-			op = getOp{key: selectKey(cfg, rnd)}
+			op = th.Get(selectKey(cfg, rnd))
 
 		case p < cfg.pGet+cfg.pPut:
 			key := selectKey(cfg, rnd)
 			val := fmt.Appendf(nil, "value-%s-v%05d-r%d", key, i, rnd.Int())
-			op = putOp{key: key, value: val}
+			op = th.Put(key, val)
 
 		case p < cfg.pGet+cfg.pPut+cfg.pFlush:
-			op = flushOp{}
+			op = th.Flush()
 
 		default:
-			op = compactOp{}
+			op = th.Compact()
 		}
 
-		err := op.run(t, ctx, b, state)
+		err := op.Run(t, ctx)
 		require.NoError(t, err, "op=%#v", op)
 	}
 
-	t.Log("Verifying final state...")
-	var verified int
-	for key, expected := range state.values {
-		actual, stats, err := b.Get(ctx, key)
-		require.NoError(t, err)
-		require.Equal(t, expected, actual,
-			"key %s: expected %q, got %q from %s",
-			key, expected, actual, stats.Source)
-		state.stats.incr(stats)
-		verified++
-	}
-	t.Logf("Verified %d keys", verified)
+	th.Verify(ctx, t)
 
-	t.Log("Stats:")
-	t.Logf("- blobs fetched: %d", state.stats.blobsFetched)
-	t.Logf("- blobs skipped: %d", state.stats.blobsSkipped)
-	t.Logf("- records scanned: %d", state.stats.totalRecordsScanned)
-	t.Logf("- worst scan: %d recs", state.stats.maxRecordsScanned)
-	t.Logf("- mean scan: %.1f recs", state.stats.meanRecordsScanned())
+	th.LogStats(t)
 }
 
-type operation interface {
-	run(t *testing.T, ctx context.Context, b *Blobby, state *testState) error
-	String() string
-}
-
-type testState struct {
-	values map[string][]byte
-	stats  testStats
-}
-
-type testStats struct {
-	numGets             uint64
-	blobsFetched        uint64
-	blobsSkipped        uint64
-	totalRecordsScanned uint64
-	maxRecordsScanned   uint64
-}
-
-func (s *testStats) incr(stats *api.GetStats) {
-	s.numGets += 1
-	s.blobsFetched += uint64(stats.BlobsFetched)
-	s.blobsSkipped += uint64(stats.BlobsSkipped)
-	s.totalRecordsScanned += uint64(stats.RecordsScanned)
-	if uint64(stats.RecordsScanned) > s.maxRecordsScanned {
-		s.maxRecordsScanned = uint64(stats.RecordsScanned)
-	}
-}
-
-func (s *testStats) meanRecordsScanned() float64 {
-	return float64(s.totalRecordsScanned) / float64(s.numGets)
-}
-
+// selectKey selects a key based on the hot/warm/cold probabilities
 func selectKey(cfg chaosTestConfig, rng *rand.Rand) string {
 	p := rng.Intn(cfg.pHot + cfg.pWarm + cfg.pCold)
 	switch {
@@ -191,101 +139,6 @@ func selectKey(cfg chaosTestConfig, rng *rand.Rand) string {
 	default:
 		return fmt.Sprintf("key-%04d", rng.Intn(cfg.nCold)+cfg.nHot+cfg.nWarm)
 	}
-}
-
-type putOp struct {
-	key   string
-	value []byte
-}
-
-func (o putOp) String() string {
-	return fmt.Sprintf("put %s=%q", o.key, o.value)
-}
-
-func (o putOp) run(t *testing.T, ctx context.Context, b *Blobby, state *testState) error {
-	dest, err := b.Put(ctx, o.key, o.value)
-	if err != nil {
-		return fmt.Errorf("put: %v", err)
-	}
-	state.values[o.key] = o.value
-	t.Logf("Put %s=%q -> %s", o.key, o.value, dest)
-	return nil
-}
-
-type getOp struct {
-	key string
-}
-
-func (o getOp) String() string {
-	return fmt.Sprintf("get %s", o.key)
-}
-
-func (o getOp) run(t *testing.T, ctx context.Context, b *Blobby, state *testState) error {
-	expected, exists := state.values[o.key]
-	actual, stats, err := b.Get(ctx, o.key)
-	if err != nil {
-		return fmt.Errorf("get: %v", err)
-	}
-
-	state.stats.incr(stats)
-
-	if !exists {
-		if actual != nil {
-			return fmt.Errorf("key %s: expected nil, got %q from %s",
-				o.key, actual, stats.Source)
-		}
-		return nil
-	}
-
-	if string(actual) != string(expected) {
-		return fmt.Errorf("key %s: expected %q, got %q from %s",
-			o.key, expected, actual, stats.Source)
-	}
-
-	t.Logf("Get %s=%q <- %s (scanned %d records in %d blobs)",
-		o.key, actual, stats.Source, stats.RecordsScanned, stats.BlobsFetched)
-	return nil
-}
-
-type flushOp struct{}
-
-func (o flushOp) String() string {
-	return "flush"
-}
-
-func (o flushOp) run(t *testing.T, ctx context.Context, b *Blobby, state *testState) error {
-	stats, err := b.Flush(ctx)
-	if err != nil {
-		// special case. it's fine if there's nothing to flush.
-		if errors.Is(err, blobstore.ErrNoRecords) {
-			t.Logf("Flush: no records.")
-			return nil
-		}
-
-		return fmt.Errorf("flush: %v", err)
-	}
-	t.Logf("Flush: %d records -> %s, now active: %s",
-		stats.Meta.Count, stats.BlobName, stats.ActiveMemtable)
-	return nil
-}
-
-type compactOp struct{}
-
-func (o compactOp) String() string {
-	return "compact"
-}
-
-func (o compactOp) run(t *testing.T, ctx context.Context, b *Blobby, state *testState) error {
-	stats, err := b.Compact(ctx, api.CompactionOptions{})
-	if err != nil {
-		return fmt.Errorf("compact: %v", err)
-	}
-	// TODO: print all of the stats, not just the first.
-	if len(stats) > 0 {
-		t.Logf("Compact: %d input files, %d output files",
-			len(stats[0].Inputs), len(stats[0].Outputs))
-	}
-	return nil
 }
 
 // getRand returns a random number generator seeded with the given seed, unless

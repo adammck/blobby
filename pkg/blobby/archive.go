@@ -48,6 +48,8 @@ type Blobby struct {
 	filters   map[string]filter.Filter
 }
 
+var _ api.Blobby = (*Blobby)(nil)
+
 func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, factory sstable.Factory) *Blobby {
 	db, err := connectToMongo(ctx, mongoURL)
 	if err != nil {
