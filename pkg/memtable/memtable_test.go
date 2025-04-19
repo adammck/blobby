@@ -168,6 +168,88 @@ func TestPutConcurrent(t *testing.T) {
 	}, recs)
 }
 
+// Helper function to enable testing of tombstone features before it's properly implemented
+// This will panic when called, simulating a not-yet-implemented feature
+func putWithTombstone(ctx context.Context, mt *Memtable, key string, value []byte, tombstone bool) (string, error) {
+	if tombstone {
+		panic("tombstone parameter is not yet implemented")
+	}
+	return mt.Put(ctx, key, value)
+}
+
+func TestPutTombstone(t *testing.T) {
+	ctx := context.Background()
+	env := testdeps.New(ctx, t, testdeps.WithMongo())
+	c := clockwork.NewFakeClock()
+	mt := New(env.MongoURL(), c)
+
+	err := mt.Init(ctx)
+	require.NoError(t, err)
+
+	// Get the current memtable name
+	currentName, err := getCurrentMemtableName(ctx, t, mt)
+	require.NoError(t, err)
+
+	// Write a regular record first
+	dest, err := putWithTombstone(ctx, mt, "test-key", []byte("test-value"), false)
+	require.NoError(t, err)
+	require.Equal(t, currentName, dest)
+
+	// This will panic until step 6 is implemented
+	t.Skip("This test will fail until tombstone support is implemented in step 6")
+
+	// Now write a tombstone record
+	c.Advance(1 * time.Second)
+	tombDest, err := putWithTombstone(ctx, mt, "test-key", nil, true)
+	require.NoError(t, err)
+	require.Equal(t, currentName, tombDest)
+
+	// Check that both records made it to mongo
+	recs := getRecords(ctx, t, mt, currentName, "test-key")
+	require.Equal(t, 2, len(recs))
+
+	// First record should be a normal record
+	require.Equal(t, "test-key", recs[0].Key)
+	require.Equal(t, []byte("test-value"), recs[0].Document)
+	require.False(t, recs[0].Tombstone)
+
+	// Second record should be a tombstone
+	require.Equal(t, "test-key", recs[1].Key)
+	require.Nil(t, recs[1].Document)
+	require.True(t, recs[1].Tombstone)
+}
+
+func TestPutTombstoneWithoutPriorRecord(t *testing.T) {
+	ctx := context.Background()
+	env := testdeps.New(ctx, t, testdeps.WithMongo())
+	c := clockwork.NewFakeClock()
+	mt := New(env.MongoURL(), c)
+
+	err := mt.Init(ctx)
+	require.NoError(t, err)
+
+	// Get the current memtable name
+	currentName, err := getCurrentMemtableName(ctx, t, mt)
+	require.NoError(t, err)
+
+	// This will panic until step 6 is implemented
+	t.Skip("This test will fail until tombstone support is implemented in step 6")
+
+	// Write a tombstone record for a key that doesn't exist yet
+	dest, err := putWithTombstone(ctx, mt, "nonexistent-key", nil, true)
+	require.NoError(t, err)
+	require.Equal(t, currentName, dest)
+
+	// Check that the tombstone record made it to mongo
+	recs := getRecords(ctx, t, mt, currentName, "nonexistent-key")
+	require.Equal(t, 1, len(recs))
+
+	// Record should be a tombstone
+	require.Equal(t, "nonexistent-key", recs[0].Key)
+	require.Nil(t, recs[0].Document)
+	require.True(t, recs[0].Tombstone)
+}
+
 // Helper function to get the current memtable name
 func getCurrentMemtableName(ctx context.Context, t *testing.T, mt *Memtable) (string, error) {
 	db, err := mt.GetMongo(ctx)
