@@ -97,7 +97,11 @@ func (mt *Memtable) getOneColl(ctx context.Context, db *mongo.Database, coll, ke
 	return &rec, nil
 }
 
-func (mt *Memtable) Put(ctx context.Context, key string, value []byte) (string, error) {
+func (mt *Memtable) Put(ctx context.Context, key string, value []byte, tombstone bool) (string, error) {
+	if tombstone {
+		panic("tombstone not yet implemented")
+	}
+
 	c, err := mt.activeCollection(ctx)
 	if err != nil {
 		return "", err

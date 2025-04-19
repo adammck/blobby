@@ -30,7 +30,7 @@ func TestSwap(t *testing.T) {
 	require.NoError(t, err)
 
 	// Write to initial table
-	dest1, err := mt.Put(ctx, "k1", []byte("v1"))
+	dest1, err := mt.Put(ctx, "k1", []byte("v1"), false)
 	require.NoError(t, err)
 	require.Equal(t, mtn1, dest1)
 
@@ -50,7 +50,7 @@ func TestSwap(t *testing.T) {
 	require.Equal(t, hNew.Name(), mtn2)
 
 	// Write to now-active table
-	dest2, err := mt.Put(ctx, "k2", []byte("v2"))
+	dest2, err := mt.Put(ctx, "k2", []byte("v2"), false)
 	require.NoError(t, err)
 	require.Equal(t, mtn2, dest2)
 
@@ -98,7 +98,7 @@ func TestPut(t *testing.T) {
 	require.NoError(t, err)
 
 	// Write to current table
-	dest, err := mt.Put(ctx, "k", []byte("vvvv"))
+	dest, err := mt.Put(ctx, "k", []byte("vvvv"), false)
 	require.NoError(t, err)
 	require.Equal(t, currentName, dest)
 
@@ -127,7 +127,7 @@ func TestPutConcurrent(t *testing.T) {
 	require.NoError(t, err)
 
 	// Normal uncontended put
-	_, err = mt.Put(ctx, "k", []byte("1111"))
+	_, err = mt.Put(ctx, "k", []byte("1111"), false)
 	require.NoError(t, err)
 	t1 := c.Now()
 
@@ -137,7 +137,7 @@ func TestPutConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		_, err = mt.Put(ctx, "k", []byte("2222"))
+		_, err = mt.Put(ctx, "k", []byte("2222"), false)
 		wg.Done()
 	}()
 
@@ -171,10 +171,7 @@ func TestPutConcurrent(t *testing.T) {
 // Helper function to enable testing of tombstone features before it's properly implemented
 // This will panic when called, simulating a not-yet-implemented feature
 func putWithTombstone(ctx context.Context, mt *Memtable, key string, value []byte, tombstone bool) (string, error) {
-	if tombstone {
-		panic("tombstone parameter is not yet implemented")
-	}
-	return mt.Put(ctx, key, value)
+	return mt.Put(ctx, key, value, tombstone)
 }
 
 func TestPutTombstone(t *testing.T) {
