@@ -39,6 +39,14 @@ func (m *FakeBlobby) Put(ctx context.Context, key string, value []byte) (string,
 	return "model", nil
 }
 
+func (m *FakeBlobby) Delete(ctx context.Context, key string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(m.data, key)
+	return "model", nil
+}
+
 // No-op but returns valid stats structure
 func (m *FakeBlobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 	return &api.FlushStats{
