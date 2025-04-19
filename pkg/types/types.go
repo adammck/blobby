@@ -17,7 +17,15 @@ type Record struct {
 }
 
 func (r *Record) Write(out io.Writer) (int, error) {
-	b, err := bson.Marshal(r)
+	// Create a copy of the record to avoid modifying the original
+	rec := *r
+
+	// If it's a tombstone record, ensure Document is nil
+	if rec.Tombstone {
+		rec.Document = nil
+	}
+
+	b, err := bson.Marshal(&rec)
 	if err != nil {
 		return 0, err
 	}
