@@ -106,6 +106,7 @@ type CompactionStats struct {
 type Blobby interface {
 	Put(ctx context.Context, key string, value []byte) (string, error)
 	Get(ctx context.Context, key string) ([]byte, *GetStats, error)
+	Delete(ctx context.Context, key string) (string, error)
 	Flush(ctx context.Context) (*FlushStats, error)
 	Compact(ctx context.Context, opts CompactionOptions) ([]*CompactionStats, error)
 }

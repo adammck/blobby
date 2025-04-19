@@ -123,7 +123,7 @@ func (b *Blobby) Init(ctx context.Context) error {
 }
 
 func (b *Blobby) Put(ctx context.Context, key string, value []byte) (string, error) {
-	return b.mt.Put(ctx, key, value)
+	return b.mt.Put(ctx, key, value, false)
 }
 
 // TODO: return the Record, or maybe the timestamp too, not just the value.
