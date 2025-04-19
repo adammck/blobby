@@ -192,8 +192,7 @@ func TestPutTombstone(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, currentName, dest)
 
-	// This will panic until step 6 is implemented
-	t.Skip("This test will fail until tombstone support is implemented in step 6")
+	// Step 6: Tombstone support is now implemented
 
 	// Now write a tombstone record
 	c.Advance(1 * time.Second)
@@ -229,8 +228,7 @@ func TestPutTombstoneWithoutPriorRecord(t *testing.T) {
 	currentName, err := getCurrentMemtableName(ctx, t, mt)
 	require.NoError(t, err)
 
-	// This will panic until step 6 is implemented
-	t.Skip("This test will fail until tombstone support is implemented in step 6")
+	// Step 6: Tombstone support is now implemented
 
 	// Write a tombstone record for a key that doesn't exist yet
 	dest, err := putWithTombstone(ctx, mt, "nonexistent-key", nil, true)

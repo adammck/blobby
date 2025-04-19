@@ -98,21 +98,25 @@ func (mt *Memtable) getOneColl(ctx context.Context, db *mongo.Database, coll, ke
 }
 
 func (mt *Memtable) Put(ctx context.Context, key string, value []byte, tombstone bool) (string, error) {
-	if tombstone {
-		panic("tombstone not yet implemented")
-	}
-
 	c, err := mt.activeCollection(ctx)
 	if err != nil {
 		return "", err
 	}
 
 	for {
-		_, err = c.InsertOne(ctx, &types.Record{
+		record := &types.Record{
 			Key:       key,
 			Timestamp: mt.clock.Now(),
 			Document:  value,
-		})
+			Tombstone: tombstone,
+		}
+
+		// For tombstone records, ensure Document is nil
+		if tombstone {
+			record.Document = nil
+		}
+
+		_, err = c.InsertOne(ctx, record)
 		if err == nil {
 			break
 		}
