@@ -429,6 +429,12 @@ func (ta *testBlobby) put(key string, val []byte) string {
 	return dest
 }
 
+func (ta *testBlobby) delete(key string) string {
+	dest, err := ta.b.Delete(ta.ctx, key)
+	require.NoError(ta.t, err)
+	return dest
+}
+
 func (ta *testBlobby) get(key string) ([]byte, *api.GetStats) {
 	val, stats, err := ta.b.Get(ta.ctx, key)
 	require.NoError(ta.t, err)

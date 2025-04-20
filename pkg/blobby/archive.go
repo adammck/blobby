@@ -126,6 +126,10 @@ func (b *Blobby) Put(ctx context.Context, key string, value []byte) (string, err
 	return b.mt.Put(ctx, key, value, false)
 }
 
+func (b *Blobby) Delete(ctx context.Context, key string) (string, error) {
+	return b.mt.Put(ctx, key, nil, true)
+}
+
 // TODO: return the Record, or maybe the timestamp too, not just the value.
 func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.GetStats, err error) {
 	stats = &api.GetStats{}
