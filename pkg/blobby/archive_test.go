@@ -416,6 +416,111 @@ func TestBasicWriteRead(t *testing.T) {
 	//  - [201, 302] at t9
 }
 
+// TestTombstoneReadBehavior tests the behavior of the Get method when working with tombstone records.
+// This validates that:
+// 1. Getting a deleted key returns nil (as if the key doesn't exist)
+// 2. Getting a key that was deleted and then re-added returns the new value
+// 3. Multiple tombstones for the same key behave correctly (only newest matters)
+func TestTombstoneReadBehavior(t *testing.T) {
+	c := clockwork.NewRealClock()
+	ctx, _, b := setup(t, c)
+
+	// Create test helper
+	tb := &testBlobby{
+		ctx: ctx,
+		c:   c,
+		t:   t,
+		b:   b,
+	}
+
+	// --- Test 1: Getting a deleted key should return nil ---
+
+	// Add a key and verify it works
+	key1 := "test-key-1"
+	val1 := []byte("test-value-1")
+	tb.put(key1, val1)
+
+	// Verify we can read it
+	readVal, _ := tb.get(key1)
+	require.Equal(t, val1, readVal, "Should be able to read the key before deletion")
+
+	// Delete the key
+	tb.delete(key1)
+
+	// Verify the key is now "gone" (returns nil)
+	readVal, _ = tb.get(key1)
+	require.Nil(t, readVal, "Deleted key should return nil")
+
+	// --- Test 2: Getting a key that was deleted then re-added should return the new value ---
+
+	// Add a key and verify it works
+	key2 := "test-key-2"
+	val2 := []byte("test-value-2")
+	tb.put(key2, val2)
+
+	// Delete the key
+	tb.delete(key2)
+
+	// Put a new value for the same key
+	newVal2 := []byte("new-test-value-2")
+	tb.put(key2, newVal2)
+
+	// Verify the new value is returned
+	readVal, _ = tb.get(key2)
+	require.Equal(t, newVal2, readVal, "Should get new value after delete+put")
+
+	// --- Test 3: Multiple tombstones for the same key (only the newest should matter) ---
+
+	// Add a key and verify it works
+	key3 := "test-key-3"
+	val3 := []byte("test-value-3")
+	tb.put(key3, val3)
+
+	// Delete the key (first tombstone)
+	tb.delete(key3)
+
+	// Delete again (second tombstone)
+	tb.delete(key3)
+
+	// Verify the key is still "gone"
+	readVal, _ = tb.get(key3)
+	require.Nil(t, readVal, "Key should still be deleted after multiple tombstones")
+
+	// Add a new value
+	newVal3 := []byte("new-test-value-3")
+	tb.put(key3, newVal3)
+
+	// Verify new value is returned
+	readVal, _ = tb.get(key3)
+	require.Equal(t, newVal3, readVal, "Should get new value after multiple tombstones")
+
+	// --- Test 4: Test with a flush in between operations ---
+
+	// Add a key and verify it works
+	key4 := "test-key-4"
+	val4 := []byte("test-value-4")
+	tb.put(key4, val4)
+
+	// Flush the memtable to create an sstable
+	_, err := b.Flush(ctx)
+	require.NoError(t, err)
+
+	// Delete the key (creating a tombstone in the new memtable)
+	tb.delete(key4)
+
+	// Verify the key is "gone" even though original value is in sstable
+	readVal, _ = tb.get(key4)
+	require.Nil(t, readVal, "Deleted key should return nil even when original value is in sstable")
+
+	// Add a new value
+	newVal4 := []byte("new-test-value-4")
+	tb.put(key4, newVal4)
+
+	// Verify the new value is returned
+	readVal, _ = tb.get(key4)
+	require.Equal(t, newVal4, readVal, "Should get new value after delete+put with flush in between")
+}
+
 type testBlobby struct {
 	ctx context.Context
 	c   clockwork.Clock
