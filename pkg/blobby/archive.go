@@ -141,6 +141,12 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 	if rec != nil {
 		// TODO: Update Memtable.Get to return stats too.
 		stats.Source = src
+
+		// If this is a tombstone record, return nil as if the key doesn't exist
+		if rec.Tombstone {
+			return nil, stats, nil
+		}
+
 		return rec.Document, stats, nil
 	}
 
@@ -204,6 +210,12 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 		stats.RecordsScanned += scanned
 
 		if rec != nil {
+			// If this is a tombstone record, return nil as if the key doesn't exist
+			if rec.Tombstone {
+				stats.Source = meta.Filename()
+				return nil, stats, nil
+			}
+
 			// return as soon as we find the first record, but that's wrong!
 			// before returning, we need to look at the record timestamp, and
 			// check whether any of the remaining metas have a minTime newer
