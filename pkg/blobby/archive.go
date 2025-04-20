@@ -306,6 +306,10 @@ func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (
 			if newestRec == nil || rec.Timestamp.After(newestRec.Timestamp) {
 				newestRec = rec
 			}
+		} else if rec.Key > key {
+			// We've moved past our key, and since the sstable is ordered by key,
+			// we won't find any more records with our key
+			return newestRec, scanned, nil
 		}
 	}
 }
