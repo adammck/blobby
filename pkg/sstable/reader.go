@@ -39,7 +39,11 @@ func NewPartialReader(rc io.ReadCloser) *Reader {
 }
 
 func (r *Reader) Next() (*types.Record, error) {
-	return types.Read(r.rc)
+	rec, err := types.Read(r.rc)
+	if rec == nil && err == nil {
+		return nil, io.EOF
+	}
+	return rec, err
 }
 
 func (r *Reader) Close() error {

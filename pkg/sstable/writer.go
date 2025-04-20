@@ -73,7 +73,16 @@ func NewWriter(clock clockwork.Clock, options ...WriterOption) *Writer {
 func (w *Writer) Add(record *types.Record) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.records = append(w.records, record)
+
+	// Ensure tombstone records have nil Document
+	if record.Tombstone && record.Document != nil {
+		recordCopy := *record
+		recordCopy.Document = nil
+		w.records = append(w.records, &recordCopy)
+	} else {
+		w.records = append(w.records, record)
+	}
+
 	return nil
 }
 
