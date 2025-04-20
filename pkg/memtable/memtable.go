@@ -103,6 +103,8 @@ func (mt *Memtable) Put(ctx context.Context, key string, value []byte, tombstone
 		return "", err
 	}
 
+	attempts := 0
+
 	for {
 		record := &types.Record{
 			Key:       key,
@@ -116,6 +118,7 @@ func (mt *Memtable) Put(ctx context.Context, key string, value []byte, tombstone
 			record.Document = nil
 		}
 
+		attempts += 1
 		_, err = c.InsertOne(ctx, record)
 		if err == nil {
 			break
@@ -124,8 +127,13 @@ func (mt *Memtable) Put(ctx context.Context, key string, value []byte, tombstone
 		// sleep and retry to get a new timestamp. it's almost certainly been
 		// long enough already, but this makes testing easier.
 		if mongo.IsDuplicateKeyError(err) {
+			if attempts > 5 {
+				return "", fmt.Errorf("persistent duplicate key error: %w; is the clock frozen?", err)
+			}
+
 			jitter := time.Duration(rand.Int63n(retryJitter.Nanoseconds()))
 			mt.clock.Sleep(retrySleep + jitter)
+
 			continue
 		}
 
