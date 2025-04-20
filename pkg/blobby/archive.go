@@ -286,7 +286,6 @@ func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error
 // with the given key is found, it is returned unless there's a newer non-tombstone
 // record with the same key. This allows tombstones to mask older versions.
 func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (*types.Record, int, error) {
-	var newestRec *types.Record
 	var scanned int
 
 	for {
@@ -296,20 +295,19 @@ func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (
 		}
 		if rec == nil {
 			// end of file
-			return newestRec, scanned, nil
+			return nil, scanned, nil
 		}
 
 		scanned++
 
 		if rec.Key == key {
-			// If this is the first matching record we've seen, or if it's newer than what we have
-			if newestRec == nil || rec.Timestamp.After(newestRec.Timestamp) {
-				newestRec = rec
-			}
+			// Records are sorted by key asc, then timestamp desc within each key,
+			// so the first match will be the newest. We can return immediately.
+			return rec, scanned, nil
 		} else if rec.Key > key {
 			// We've moved past our key, and since the sstable is ordered by key,
 			// we won't find any more records with our key
-			return newestRec, scanned, nil
+			return nil, scanned, nil
 		}
 	}
 }
