@@ -211,6 +211,104 @@ func TestWriteOrder(t *testing.T) {
 	assert.Nil(t, rec5)
 }
 
+func TestTombstoneRecordOrdering(t *testing.T) {
+	w, c := newWriter()
+
+	// truncate and convert to UTC to make assertions easier, since the round-
+	// trip through BSON does this.
+	ts1 := c.Now().UTC().Truncate(time.Millisecond)
+	ts2 := ts1.Add(time.Hour)
+	ts3 := ts2.Add(time.Hour)
+
+	// add records with tombstones, in mixed order
+	w.Add(&types.Record{Key: "key1", Timestamp: ts1, Document: []byte("k1t1")})
+	w.Add(&types.Record{Key: "key2", Timestamp: ts2, Document: []byte("k2t2")})
+	w.Add(&types.Record{Key: "key1", Timestamp: ts2, Tombstone: true}) // tombstone for key1 at ts2
+	w.Add(&types.Record{Key: "key1", Timestamp: ts3, Document: []byte("k1t3")})
+	w.Add(&types.Record{Key: "key2", Timestamp: ts3, Tombstone: true}) // tombstone for key2 at ts3
+
+	var buf bytes.Buffer
+	_, _, _, err := w.Write(&buf)
+	require.NoError(t, err)
+
+	r, err := NewReader(io.NopCloser(&buf))
+	require.NoError(t, err)
+
+	// verify records are ordered correctly with tombstones
+	// key1's newest record should come first
+	rec1, err := r.Next()
+	require.NoError(t, err)
+	assert.Equal(t, "key1", rec1.Key)
+	assert.Equal(t, ts3, rec1.Timestamp)
+	assert.Equal(t, []byte("k1t3"), rec1.Document)
+	assert.False(t, rec1.Tombstone)
+
+	// key1's tombstone should come next
+	rec2, err := r.Next()
+	require.NoError(t, err)
+	assert.Equal(t, "key1", rec2.Key)
+	assert.Equal(t, ts2, rec2.Timestamp)
+	assert.Nil(t, rec2.Document)
+	assert.True(t, rec2.Tombstone)
+
+	// key1's oldest record comes last among key1 records
+	rec3, err := r.Next()
+	require.NoError(t, err)
+	assert.Equal(t, "key1", rec3.Key)
+	assert.Equal(t, ts1, rec3.Timestamp)
+	assert.Equal(t, []byte("k1t1"), rec3.Document)
+	assert.False(t, rec3.Tombstone)
+
+	// key2's tombstone should come first for key2
+	rec4, err := r.Next()
+	require.NoError(t, err)
+	assert.Equal(t, "key2", rec4.Key)
+	assert.Equal(t, ts3, rec4.Timestamp)
+	assert.Nil(t, rec4.Document)
+	assert.True(t, rec4.Tombstone)
+
+	// key2's record comes next
+	rec5, err := r.Next()
+	require.NoError(t, err)
+	assert.Equal(t, "key2", rec5.Key)
+	assert.Equal(t, ts2, rec5.Timestamp)
+	assert.Equal(t, []byte("k2t2"), rec5.Document)
+	assert.False(t, rec5.Tombstone)
+
+	// EOF
+	rec6, err := r.Next()
+	assert.Nil(t, rec6)
+	assert.Equal(t, io.EOF, err)
+}
+
+func TestTombstoneWithoutDocument(t *testing.T) {
+	w, c := newWriter()
+	ts := c.Now().UTC().Truncate(time.Millisecond)
+
+	// Add tombstone record
+	w.Add(&types.Record{Key: "key1", Timestamp: ts, Tombstone: true})
+
+	var buf bytes.Buffer
+	_, _, _, err := w.Write(&buf)
+	require.NoError(t, err)
+
+	r, err := NewReader(io.NopCloser(&buf))
+	require.NoError(t, err)
+
+	// Verify the tombstone record is serialized correctly
+	rec, err := r.Next()
+	require.NoError(t, err)
+	assert.Equal(t, "key1", rec.Key)
+	assert.Equal(t, ts, rec.Timestamp)
+	assert.Nil(t, rec.Document)
+	assert.True(t, rec.Tombstone)
+
+	// EOF
+	rec2, err := r.Next()
+	assert.Nil(t, rec2)
+	assert.Equal(t, io.EOF, err)
+}
+
 type writeFailer struct{}
 
 func (w *writeFailer) Write(p []byte) (n int, err error) {
