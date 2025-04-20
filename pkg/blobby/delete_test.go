@@ -2,16 +2,13 @@ package blobby
 
 import (
 	"testing"
-	"time"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 )
 
 func TestDelete(t *testing.T) {
-	// Fix the clock to the current time
-	ts := time.Now().UTC().Truncate(time.Second)
-	c := clockwork.NewFakeClockAt(ts)
+	c := clockwork.NewRealClock()
 	ctx, _, b := setup(t, c)
 
 	// Test case 1: Delete an existing key
@@ -77,12 +74,10 @@ func TestDelete(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add second version
-	c.Advance(time.Millisecond * 100)
 	dest, err = b.Put(ctx, "versioned", []byte("v2"))
 	require.NoError(t, err)
 
 	// Delete it
-	c.Advance(time.Millisecond * 100)
 	dest, err = b.Delete(ctx, "versioned")
 	require.NoError(t, err)
 	require.NotEmpty(t, dest)
