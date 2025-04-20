@@ -96,13 +96,28 @@ func (w *Writer) Write(out io.Writer) (*api.BlobMeta, []api.IndexEntry, filter.F
 	// in *descending* order, so the newest one (i.e. the highest timestamp) is
 	// first. this way, when scanning for the newest, we can as soon as we find
 	// a single key.
+	// For records with the same key and timestamp, tombstones come first to ensure
+	// they mask older records with the same key.
 	slices.SortFunc(w.records, func(a, b *types.Record) int {
 		c := strings.Compare(a.Key, b.Key)
 		if c != 0 {
 			return c
 		}
 
-		return b.Timestamp.Compare(a.Timestamp)
+		tc := b.Timestamp.Compare(a.Timestamp)
+		if tc != 0 {
+			return tc
+		}
+
+		// If timestamps are equal, tombstones come first
+		if a.Tombstone && !b.Tombstone {
+			return -1
+		}
+		if !a.Tombstone && b.Tombstone {
+			return 1
+		}
+
+		return 0
 	})
 
 	n, err := out.Write([]byte(magicBytes))
