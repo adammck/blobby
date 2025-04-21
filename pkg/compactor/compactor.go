@@ -8,7 +8,6 @@ import (
 	"sort"
 
 	"github.com/adammck/blobby/pkg/api"
-	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/adammck/blobby/pkg/filter"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
@@ -18,14 +17,14 @@ import (
 )
 
 type Compactor struct {
-	bs    *blobstore.Blobstore
+	bs    *sstable.Manager
 	md    *metadata.Store
 	ixs   api.IndexStore
 	fs    api.FilterStore
 	clock clockwork.Clock
 }
 
-func New(clock clockwork.Clock, bs *blobstore.Blobstore, md *metadata.Store, ixs api.IndexStore, fs api.FilterStore) *Compactor {
+func New(clock clockwork.Clock, bs *sstable.Manager, md *metadata.Store, ixs api.IndexStore, fs api.FilterStore) *Compactor {
 	return &Compactor{
 		clock: clock,
 		bs:    bs,

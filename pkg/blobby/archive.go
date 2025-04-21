@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
-	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/adammck/blobby/pkg/compactor"
 	"github.com/adammck/blobby/pkg/filter"
+	s3blobstore "github.com/adammck/blobby/pkg/impl/blobstore/s3"
 	mfilterstore "github.com/adammck/blobby/pkg/impl/filterstore/mongo"
 	mindexstore "github.com/adammck/blobby/pkg/impl/indexstore/mongo"
 	"github.com/adammck/blobby/pkg/index"
@@ -32,7 +32,7 @@ const (
 
 type Blobby struct {
 	mt    *memtable.Memtable
-	bs    *blobstore.Blobstore
+	bs    *sstable.Manager
 	md    *metadata.Store
 	ixs   api.IndexStore
 	fs    api.FilterStore
@@ -62,7 +62,7 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, fa
 	md := metadata.New(mongoURL)
 
 	// Create blobstore with factory
-	bs := blobstore.New(bucket, clock, factory)
+	bs := sstable.NewManager(s3blobstore.New(bucket), clock, factory)
 
 	return &Blobby{
 		mt:    memtable.New(mongoURL, clock),
@@ -98,11 +98,6 @@ func (b *Blobby) Ping(ctx context.Context) error {
 	err := b.mt.Ping(ctx)
 	if err != nil {
 		return fmt.Errorf("memtable.Ping: %w", err)
-	}
-
-	err = b.bs.Ping(ctx)
-	if err != nil {
-		return fmt.Errorf("blobstore.Ping: %w", err)
 	}
 
 	return nil

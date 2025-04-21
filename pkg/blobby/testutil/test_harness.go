@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/adammck/blobby/pkg/api"
-	"github.com/adammck/blobby/pkg/blobstore"
+	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/stretchr/testify/require"
 )
 
@@ -182,7 +182,7 @@ func (o FlushOp) Run(t *testing.T, ctx context.Context) error {
 	stats, err := o.h.sut.Flush(ctx)
 	if err != nil {
 		// special case. it's fine if there's nothing to flush.
-		if errors.Is(err, blobstore.ErrNoRecords) {
+		if errors.Is(err, sstable.ErrNoRecords) {
 			t.Logf("Flush: no records.")
 			return nil
 		}
