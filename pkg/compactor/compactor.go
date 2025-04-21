@@ -8,7 +8,6 @@ import (
 	"sort"
 
 	"github.com/adammck/blobby/pkg/api"
-	"github.com/adammck/blobby/pkg/filter"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/adammck/blobby/pkg/types"
@@ -108,7 +107,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 
 	var meta *api.BlobMeta
 	var idx []api.IndexEntry
-	var f filter.Filter
+	var f api.FilterDecoded
 
 	g.Go(func() error {
 		var err error

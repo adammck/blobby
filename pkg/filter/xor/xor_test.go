@@ -58,7 +58,7 @@ func TestXorFilterErrors(t *testing.T) {
 	require.Error(t, err)
 
 	// Test with invalid filter type
-	invalidTypeFilter := api.Filter{
+	invalidTypeFilter := &api.FilterEncoded{
 		Type: "invalid",
 		Data: []byte{1, 2, 3},
 	}
@@ -66,7 +66,7 @@ func TestXorFilterErrors(t *testing.T) {
 	require.Error(t, err)
 
 	// Test with empty filter data
-	emptyDataFilter := api.Filter{
+	emptyDataFilter := &api.FilterEncoded{
 		Type: TypeName,
 		Data: nil,
 	}
@@ -74,7 +74,7 @@ func TestXorFilterErrors(t *testing.T) {
 	require.Error(t, err)
 
 	// Test with corrupted filter data
-	corruptedDataFilter := api.Filter{
+	corruptedDataFilter := &api.FilterEncoded{
 		Type: TypeName,
 		Data: []byte{1, 2, 3}, // Not a valid serialized filter
 	}

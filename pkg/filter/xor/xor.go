@@ -19,7 +19,7 @@ type Filter struct {
 	xf *xorfilter.BinaryFuse8
 }
 
-func Unmarshal(f api.Filter) (*Filter, error) {
+func Unmarshal(f *api.FilterEncoded) (*Filter, error) {
 	if f.Type != TypeName {
 		return nil, fmt.Errorf("bad type: %s", f.Type)
 	}
@@ -35,7 +35,7 @@ func Unmarshal(f api.Filter) (*Filter, error) {
 	return &Filter{xf: &xf}, nil
 }
 
-func Create(keys []string) (*Filter, error) {
+func Create(keys []string) (api.FilterDecoded, error) {
 	if len(keys) == 0 {
 		return nil, errors.New("empty key set")
 	}
@@ -58,13 +58,13 @@ func (f *Filter) Contains(key string) bool {
 	return x
 }
 
-func (f *Filter) Marshal() (api.Filter, error) {
+func (f *Filter) Marshal() (*api.FilterEncoded, error) {
 	data, err := marshal(f.xf)
 	if err != nil {
-		return api.Filter{}, err
+		return nil, err
 	}
 
-	return api.Filter{
+	return &api.FilterEncoded{
 		Type: TypeName,
 		Data: data,
 	}, nil

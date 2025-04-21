@@ -25,7 +25,7 @@ func TestNew(t *testing.T) {
 	data, err := json.Marshal(stored)
 	require.NoError(t, err)
 
-	apiFilter := api.Filter{
+	apiFilter := &api.FilterEncoded{
 		Type: TypeName,
 		Data: data,
 	}

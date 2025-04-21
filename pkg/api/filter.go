@@ -5,14 +5,15 @@ import (
 	"fmt"
 )
 
-type FilterCreator interface {
-	Create(keys []string) (Filter, error)
+type FilterDecoded interface {
+	Contains(key string) bool
+	Marshal() (*FilterEncoded, error)
 }
 
-// Filter encapsulates a serialized set-membership filter, e.g. a bloom filter,
-// and the type information needed to deserialize it. These are read from and
-// written to a FilterStore.
-type Filter struct {
+// FilterEncoded encapsulates a serialized set-membership filter, e.g. a bloom
+// filter, and the type information needed to deserialize it. These are read
+// from and written to a FilterStore.
+type FilterEncoded struct {
 	// Type identifies the algorithm (e.g., "xor", "ribbon", "bloom").
 	Type string `bson:"type"`
 
@@ -23,10 +24,10 @@ type Filter struct {
 // FilterStore defines the interface for storing/retrieving filters
 type FilterStore interface {
 	// Put stores a filter for the given sstable filename
-	Put(ctx context.Context, filename string, filter Filter) error
+	Put(ctx context.Context, filename string, filter *FilterEncoded) error
 
 	// Get retrieves the filter for the given sstable filename
-	Get(ctx context.Context, filename string) (Filter, error)
+	Get(ctx context.Context, filename string) (*FilterEncoded, error)
 
 	// Delete deletes the filter for the given sstable filename
 	Delete(ctx context.Context, filename string) error

@@ -45,7 +45,7 @@ type Blobby struct {
 
 	// filter cache
 	filtersMu sync.Mutex
-	filters   map[string]filter.Filter
+	filters   map[string]api.FilterDecoded
 }
 
 var _ api.Blobby = (*Blobby)(nil)
@@ -74,7 +74,7 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, fa
 		comp:  compactor.New(clock, bs, md, ixs, fs),
 
 		indexes: map[string]*index.Index{},
-		filters: map[string]filter.Filter{},
+		filters: map[string]api.FilterDecoded{},
 	}
 }
 
@@ -100,10 +100,10 @@ func (b *Blobby) Ping(ctx context.Context) error {
 		return fmt.Errorf("memtable.Ping: %w", err)
 	}
 
-	err = b.bs.Ping(ctx)
-	if err != nil {
-		return fmt.Errorf("blobstore.Ping: %w", err)
-	}
+	// err = b.bs.Ping(ctx)
+	// if err != nil {
+	// 	return fmt.Errorf("blobstore.Ping: %w", err)
+	// }
 
 	return nil
 }
@@ -246,7 +246,7 @@ func (b *Blobby) getIndex(ctx context.Context, fn string) (*index.Index, error) 
 // the cache, it will be fetched from the FilterStore and cached forever.
 //
 // TODO: add some kind of expiration policy.
-func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error) {
+func (b *Blobby) getFilter(ctx context.Context, fn string) (api.FilterDecoded, error) {
 	b.filtersMu.Lock()
 	defer b.filtersMu.Unlock()
 
@@ -321,7 +321,7 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 	var dest string
 	var meta *api.BlobMeta
 	var idx []api.IndexEntry
-	var f filter.Filter
+	var f api.FilterDecoded
 
 	g.Go(func() error {
 		var err error

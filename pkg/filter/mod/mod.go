@@ -19,7 +19,7 @@ type Filter struct {
 	keys map[string]struct{}
 }
 
-func Unmarshal(f api.Filter) (*Filter, error) {
+func Unmarshal(f *api.FilterEncoded) (api.FilterDecoded, error) {
 	if f.Type != TypeName {
 		return nil, fmt.Errorf("bad type: %s", f.Type)
 	}
@@ -69,7 +69,7 @@ func (f *Filter) Contains(key string) bool {
 	return ok
 }
 
-func (f *Filter) Marshal() (api.Filter, error) {
+func (f *Filter) Marshal() (*api.FilterEncoded, error) {
 	keys := make([]string, 0, len(f.keys))
 	for k := range f.keys {
 		keys = append(keys, k)
@@ -77,10 +77,10 @@ func (f *Filter) Marshal() (api.Filter, error) {
 
 	data, err := json.Marshal(keys)
 	if err != nil {
-		return api.Filter{}, err
+		return nil, err
 	}
 
-	return api.Filter{
+	return &api.FilterEncoded{
 		Type: TypeName,
 		Data: data,
 	}, nil
