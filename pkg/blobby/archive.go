@@ -325,15 +325,7 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 
 	g.Go(func() error {
 		var err error
-		// Convert the record channel to interface{} channel
-		chanInterface := make(chan interface{})
-		go func() {
-			defer close(chanInterface)
-			for rec := range ch {
-				chanInterface <- rec
-			}
-		}()
-		dest, _, meta, idx, f, err = b.bs.Flush(ctx2, chanInterface)
+		dest, _, meta, idx, f, err = b.bs.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}

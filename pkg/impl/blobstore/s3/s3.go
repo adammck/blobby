@@ -99,7 +99,7 @@ func (bs *BlobStore) Ping(ctx context.Context) error {
 	return err
 }
 
-func (bs *BlobStore) Flush(ctx context.Context, ch <-chan interface{}) (dest string, count int, meta *api.BlobMeta, index []api.IndexEntry, filter api.Filter, err error) {
+func (bs *BlobStore) Flush(ctx context.Context, ch <-chan *types.Record) (dest string, count int, meta *api.BlobMeta, index []api.IndexEntry, filter api.Filter, err error) {
 	f, err := os.CreateTemp("", "sstable-*")
 	if err != nil {
 		return "", 0, nil, nil, nil, fmt.Errorf("CreateTemp: %w", err)
@@ -110,13 +110,11 @@ func (bs *BlobStore) Flush(ctx context.Context, ch <-chan interface{}) (dest str
 	w := bs.factory.NewWriter()
 	n := 0
 	for rec := range ch {
-		if typedRec, ok := rec.(*types.Record); ok {
-			err = w.Add(typedRec)
-			if err != nil {
-				return "", 0, nil, nil, nil, fmt.Errorf("Write: %w", err)
-			}
-			n++
+		err = w.Add(rec)
+		if err != nil {
+			return "", 0, nil, nil, nil, fmt.Errorf("Write: %w", err)
 		}
+		n++
 	}
 
 	if n == 0 {

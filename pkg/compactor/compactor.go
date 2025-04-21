@@ -111,16 +111,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 
 	g.Go(func() error {
 		var err error
-		// Convert the record channel to interface{} channel
-		// TODO(adammck): why?
-		chanInterface := make(chan interface{})
-		go func() {
-			defer close(chanInterface)
-			for rec := range ch {
-				chanInterface <- rec
-			}
-		}()
-		_, _, meta, idx, f, err = c.bs.Flush(ctx2, chanInterface)
+		_, _, meta, idx, f, err = c.bs.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}

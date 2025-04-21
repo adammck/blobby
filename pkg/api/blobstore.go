@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"io"
+
+	"github.com/adammck/blobby/pkg/types"
 )
 
 // ErrNoRecords is returned when attempting to flush an empty channel
@@ -22,5 +24,5 @@ type BlobStore interface {
 	Delete(ctx context.Context, key string) error
 
 	// Flush writes a new blob from the records channel
-	Flush(ctx context.Context, ch <-chan interface{}) (dest string, count int, meta *BlobMeta, index []IndexEntry, filter Filter, err error)
+	Flush(ctx context.Context, ch <-chan *types.Record) (dest string, count int, meta *BlobMeta, index []IndexEntry, filter Filter, err error)
 }

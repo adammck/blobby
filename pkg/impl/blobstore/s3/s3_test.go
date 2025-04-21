@@ -32,7 +32,7 @@ func setup(t *testing.T) (context.Context, *testdeps.Env, *BlobStore, clockwork.
 func TestFlushEmpty(t *testing.T) {
 	ctx, _, bs, _ := setup(t)
 
-	ch := make(chan interface{})
+	ch := make(chan *types.Record)
 	close(ch)
 
 	_, _, _, _, _, err := bs.Flush(ctx, ch)
@@ -42,7 +42,7 @@ func TestFlushEmpty(t *testing.T) {
 func TestFlush(t *testing.T) {
 	ctx, _, bs, clock := setup(t)
 
-	ch := make(chan interface{})
+	ch := make(chan *types.Record)
 	go func() {
 		ch <- &types.Record{
 			Key:       "test1",

@@ -72,19 +72,17 @@ func (m *BlobStore) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-func (m *BlobStore) Flush(ctx context.Context, ch <-chan interface{}) (string, int, *api.BlobMeta, []api.IndexEntry, api.Filter, error) {
+func (m *BlobStore) Flush(ctx context.Context, ch <-chan *types.Record) (string, int, *api.BlobMeta, []api.IndexEntry, api.Filter, error) {
 	var buf bytes.Buffer
 	w := m.factory.NewWriter()
 	n := 0
 
 	for rec := range ch {
-		if typedRec, ok := rec.(*types.Record); ok {
-			err := w.Add(typedRec)
-			if err != nil {
-				return "", 0, nil, nil, nil, fmt.Errorf("sstable.Add: %w", err)
-			}
-			n++
+		err := w.Add(rec)
+		if err != nil {
+			return "", 0, nil, nil, nil, fmt.Errorf("sstable.Add: %w", err)
 		}
+		n++
 	}
 
 	if n == 0 {
