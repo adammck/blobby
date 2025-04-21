@@ -19,7 +19,7 @@ type Filter struct {
 	keys map[string]struct{}
 }
 
-func Unmarshal(f *api.FilterEncoded) (api.FilterDecoded, error) {
+func Unmarshal(f *api.FilterEncoded) (api.Filter, error) {
 	if f.Type != TypeName {
 		return nil, fmt.Errorf("bad type: %s", f.Type)
 	}

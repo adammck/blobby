@@ -35,7 +35,7 @@ func Unmarshal(f *api.FilterEncoded) (*Filter, error) {
 	return &Filter{xf: &xf}, nil
 }
 
-func Create(keys []string) (api.FilterDecoded, error) {
+func Create(keys []string) (api.Filter, error) {
 	if len(keys) == 0 {
 		return nil, errors.New("empty key set")
 	}

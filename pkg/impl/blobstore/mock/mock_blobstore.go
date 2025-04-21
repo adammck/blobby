@@ -72,7 +72,7 @@ func (m *BlobStore) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-func (m *BlobStore) Flush(ctx context.Context, ch <-chan interface{}) (string, int, *api.BlobMeta, []api.IndexEntry, api.FilterDecoded, error) {
+func (m *BlobStore) Flush(ctx context.Context, ch <-chan interface{}) (string, int, *api.BlobMeta, []api.IndexEntry, api.Filter, error) {
 	var buf bytes.Buffer
 	w := m.factory.NewWriter()
 	n := 0

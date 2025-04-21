@@ -107,7 +107,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 
 	var meta *api.BlobMeta
 	var idx []api.IndexEntry
-	var f api.FilterDecoded
+	var f api.Filter
 
 	g.Go(func() error {
 		var err error

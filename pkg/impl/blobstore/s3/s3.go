@@ -99,7 +99,7 @@ func (bs *BlobStore) Ping(ctx context.Context) error {
 	return err
 }
 
-func (bs *BlobStore) Flush(ctx context.Context, ch <-chan interface{}) (dest string, count int, meta *api.BlobMeta, index []api.IndexEntry, filter api.FilterDecoded, err error) {
+func (bs *BlobStore) Flush(ctx context.Context, ch <-chan interface{}) (dest string, count int, meta *api.BlobMeta, index []api.IndexEntry, filter api.Filter, err error) {
 	f, err := os.CreateTemp("", "sstable-*")
 	if err != nil {
 		return "", 0, nil, nil, nil, fmt.Errorf("CreateTemp: %w", err)

@@ -10,7 +10,7 @@ import (
 	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/compactor"
 	"github.com/adammck/blobby/pkg/filter"
-	"github.com/adammck/blobby/pkg/impl/blobstore/s3"
+	s3blobstore "github.com/adammck/blobby/pkg/impl/blobstore/s3"
 	mfilterstore "github.com/adammck/blobby/pkg/impl/filterstore/mongo"
 	mindexstore "github.com/adammck/blobby/pkg/impl/indexstore/mongo"
 	"github.com/adammck/blobby/pkg/index"
@@ -45,7 +45,7 @@ type Blobby struct {
 
 	// filter cache
 	filtersMu sync.Mutex
-	filters   map[string]api.FilterDecoded
+	filters   map[string]api.Filter
 }
 
 var _ api.Blobby = (*Blobby)(nil)
@@ -62,7 +62,7 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, fa
 	md := metadata.New(mongoURL)
 
 	// Create blobstore with factory
-	bs := s3.New(bucket, clock, factory)
+	bs := s3blobstore.New(bucket, clock, factory)
 
 	return &Blobby{
 		mt:    memtable.New(mongoURL, clock),
@@ -74,7 +74,7 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, fa
 		comp:  compactor.New(clock, bs, md, ixs, fs),
 
 		indexes: map[string]*index.Index{},
-		filters: map[string]api.FilterDecoded{},
+		filters: map[string]api.Filter{},
 	}
 }
 
@@ -246,7 +246,7 @@ func (b *Blobby) getIndex(ctx context.Context, fn string) (*index.Index, error) 
 // the cache, it will be fetched from the FilterStore and cached forever.
 //
 // TODO: add some kind of expiration policy.
-func (b *Blobby) getFilter(ctx context.Context, fn string) (api.FilterDecoded, error) {
+func (b *Blobby) getFilter(ctx context.Context, fn string) (api.Filter, error) {
 	b.filtersMu.Lock()
 	defer b.filtersMu.Unlock()
 
@@ -321,7 +321,7 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 	var dest string
 	var meta *api.BlobMeta
 	var idx []api.IndexEntry
-	var f api.FilterDecoded
+	var f api.Filter
 
 	g.Go(func() error {
 		var err error

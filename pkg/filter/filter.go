@@ -8,7 +8,7 @@ import (
 	"github.com/adammck/blobby/pkg/filter/xor"
 )
 
-func Create(ft string, keys []string) (api.FilterDecoded, error) {
+func Create(ft string, keys []string) (api.Filter, error) {
 	switch ft {
 	case xor.TypeName:
 		return xor.Create(keys)
@@ -19,7 +19,7 @@ func Create(ft string, keys []string) (api.FilterDecoded, error) {
 	}
 }
 
-func Unmarshal(f *api.FilterEncoded) (api.FilterDecoded, error) {
+func Unmarshal(f *api.FilterEncoded) (api.Filter, error) {
 	switch f.Type {
 	case xor.TypeName:
 		return xor.Unmarshal(f)

@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-type FilterDecoded interface {
+type Filter interface {
 	Contains(key string) bool
 	Marshal() (*FilterEncoded, error)
 }
