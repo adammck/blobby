@@ -1,10 +1,12 @@
-package blobstore
+// pkg/impl/blobstore/awss3/blobstore_test.go
+package s3
 
 import (
 	"context"
 	"testing"
 	"time"
 
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/sstable"
 	testsst "github.com/adammck/blobby/pkg/sstable/testutil"
 	"github.com/adammck/blobby/pkg/testdeps"
@@ -14,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setup(t *testing.T) (context.Context, *testdeps.Env, *Blobstore, clockwork.Clock) {
+func setup(t *testing.T) (context.Context, *testdeps.Env, *BlobStore, clockwork.Clock) {
 	ctx := context.Background()
 	env := testdeps.New(ctx, t, testdeps.WithMinio())
 	clock := clockwork.NewFakeClock()
@@ -30,18 +32,17 @@ func setup(t *testing.T) (context.Context, *testdeps.Env, *Blobstore, clockwork.
 func TestFlushEmpty(t *testing.T) {
 	ctx, _, bs, _ := setup(t)
 
-	ch := make(chan *types.Record)
+	ch := make(chan interface{})
 	close(ch)
 
 	_, _, _, _, _, err := bs.Flush(ctx, ch)
-	assert.ErrorIs(t, err, ErrNoRecords)
-	//assert.Len(t, idx.Contents, 0)
+	assert.ErrorIs(t, err, api.ErrNoRecords)
 }
 
 func TestFlush(t *testing.T) {
 	ctx, _, bs, clock := setup(t)
 
-	ch := make(chan *types.Record)
+	ch := make(chan interface{})
 	go func() {
 		ch <- &types.Record{
 			Key:       "test1",
@@ -62,11 +63,13 @@ func TestFlush(t *testing.T) {
 	assert.Equal(t, "test1", meta.MinKey)
 	assert.Equal(t, "test2", meta.MaxKey)
 
-	// check that an index was written. the contents don't matter.
+	// check that an index was written
 	assert.Greater(t, len(idx), 0)
 
-	// both records were written.
-	sst, err := bs.GetFull(ctx, meta.Filename())
+	// both records were written
+	body, err := bs.GetFull(ctx, meta.Filename())
+	require.NoError(t, err)
+	sst, err := sstable.NewReader(body)
 	require.NoError(t, err)
 	recs := testsst.Map(t, sst)
 	assert.Contains(t, recs, "test1")

@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
-	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/adammck/blobby/pkg/compactor"
 	"github.com/adammck/blobby/pkg/filter"
+	"github.com/adammck/blobby/pkg/impl/blobstore/s3"
 	mfilterstore "github.com/adammck/blobby/pkg/impl/filterstore/mongo"
 	mindexstore "github.com/adammck/blobby/pkg/impl/indexstore/mongo"
 	"github.com/adammck/blobby/pkg/index"
@@ -32,7 +32,7 @@ const (
 
 type Blobby struct {
 	mt    *memtable.Memtable
-	bs    *blobstore.Blobstore
+	bs    api.BlobStore
 	md    *metadata.Store
 	ixs   api.IndexStore
 	fs    api.FilterStore
@@ -62,7 +62,7 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, fa
 	md := metadata.New(mongoURL)
 
 	// Create blobstore with factory
-	bs := blobstore.New(bucket, clock, factory)
+	bs := s3.New(bucket, clock, factory)
 
 	return &Blobby{
 		mt:    memtable.New(mongoURL, clock),
@@ -174,16 +174,22 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 
 		var r *sstable.Reader
 		if rng != nil {
-			r, err = b.bs.GetPartial(ctx, meta.Filename(), rng.First, rng.Last)
+			body, err := b.bs.GetPartial(ctx, meta.Filename(), rng.First, rng.Last)
 			if err != nil {
 				return nil, stats, fmt.Errorf("blobstore.GetPartial: %w", err)
 			}
+			r = sstable.NewPartialReader(body)
 		} else {
 			// if the index couldn't be fetched, that's not ideal, but we can
 			// just read the entire sstable. hope it's not too big.
-			r, err = b.bs.GetFull(ctx, meta.Filename())
+			body, err := b.bs.GetFull(ctx, meta.Filename())
 			if err != nil {
 				return nil, stats, fmt.Errorf("blobstore.Get: %w", err)
+			}
+			r, err = sstable.NewReader(body)
+			if err != nil {
+				body.Close()
+				return nil, stats, fmt.Errorf("sstable.NewReader: %w", err)
 			}
 		}
 
@@ -319,7 +325,15 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 
 	g.Go(func() error {
 		var err error
-		dest, _, meta, idx, f, err = b.bs.Flush(ctx2, ch)
+		// Convert the record channel to interface{} channel
+		chanInterface := make(chan interface{})
+		go func() {
+			defer close(chanInterface)
+			for rec := range ch {
+				chanInterface <- rec
+			}
+		}()
+		dest, _, meta, idx, f, err = b.bs.Flush(ctx2, chanInterface)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}

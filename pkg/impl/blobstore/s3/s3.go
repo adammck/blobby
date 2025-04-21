@@ -1,13 +1,13 @@
-package blobstore
+// pkg/impl/blobstore/awss3/blobstore.go
+package s3
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/adammck/blobby/pkg/api"
-	"github.com/adammck/blobby/pkg/filter"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -16,26 +16,24 @@ import (
 	"github.com/jonboulle/clockwork"
 )
 
-var ErrNoRecords = errors.New("NoRecords")
-
-type Blobstore struct {
+type BlobStore struct {
 	bucket  string
 	s3      *s3.Client
 	clock   clockwork.Clock
 	factory sstable.Factory
 }
 
-func New(bucket string, clock clockwork.Clock, factory sstable.Factory) *Blobstore {
-	return &Blobstore{
+var _ api.BlobStore = (*BlobStore)(nil) // Type check: implements interface
+
+func New(bucket string, clock clockwork.Clock, factory sstable.Factory) *BlobStore {
+	return &BlobStore{
 		bucket:  bucket,
 		clock:   clock,
 		factory: factory,
 	}
 }
 
-// GetFull reads a single SSTable from the blobstore.
-// The caller must call Close on the reader when finished.
-func (bs *Blobstore) GetFull(ctx context.Context, key string) (*sstable.Reader, error) {
+func (bs *BlobStore) GetFull(ctx context.Context, key string) (io.ReadCloser, error) {
 	s3client, err := bs.getS3(ctx)
 	if err != nil {
 		return nil, err
@@ -49,18 +47,10 @@ func (bs *Blobstore) GetFull(ctx context.Context, key string) (*sstable.Reader, 
 		return nil, fmt.Errorf("GetObject: %w", err)
 	}
 
-	reader, err := sstable.NewReader(output.Body)
-	if err != nil {
-		return nil, fmt.Errorf("NewReader: %w", err)
-	}
-
-	return reader, nil
+	return output.Body, nil
 }
 
-// GetPartial reads a byte range of an SSTable from the blob store. This is much
-// faster than reading the entire blob. The first and last args are inclusive,
-// per RFC 7233
-func (bs *Blobstore) GetPartial(ctx context.Context, key string, first, last int64) (*sstable.Reader, error) {
+func (bs *BlobStore) GetPartial(ctx context.Context, key string, first, last int64) (io.ReadCloser, error) {
 	s3c, err := bs.getS3(ctx)
 	if err != nil {
 		return nil, err
@@ -84,11 +74,10 @@ func (bs *Blobstore) GetPartial(ctx context.Context, key string, first, last int
 		return nil, fmt.Errorf("GetObject: %w", err)
 	}
 
-	reader := sstable.NewPartialReader(output.Body)
-	return reader, nil
+	return output.Body, nil
 }
 
-func (bs *Blobstore) Delete(ctx context.Context, key string) error {
+func (bs *BlobStore) Delete(ctx context.Context, key string) error {
 	s3c, err := bs.getS3(ctx)
 	if err != nil {
 		return err
@@ -105,17 +94,12 @@ func (bs *Blobstore) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-func (bs *Blobstore) Ping(ctx context.Context) error {
+func (bs *BlobStore) Ping(ctx context.Context) error {
 	_, err := bs.getS3(ctx)
 	return err
 }
 
-func (bs *Blobstore) Init(ctx context.Context) error {
-	return nil
-}
-
-// TODO: remove most of the return values; meta contains everything.
-func (bs *Blobstore) Flush(ctx context.Context, ch <-chan *types.Record) (dest string, count int, meta *api.BlobMeta, index []api.IndexEntry, filter filter.Filter, err error) {
+func (bs *BlobStore) Flush(ctx context.Context, ch <-chan interface{}) (dest string, count int, meta *api.BlobMeta, index []api.IndexEntry, filter api.Filter, err error) {
 	f, err := os.CreateTemp("", "sstable-*")
 	if err != nil {
 		return "", 0, nil, nil, nil, fmt.Errorf("CreateTemp: %w", err)
@@ -126,19 +110,20 @@ func (bs *Blobstore) Flush(ctx context.Context, ch <-chan *types.Record) (dest s
 	w := bs.factory.NewWriter()
 	n := 0
 	for rec := range ch {
-		err = w.Add(rec)
-		if err != nil {
-			return "", 0, nil, nil, nil, fmt.Errorf("Write: %w", err)
+		if typedRec, ok := rec.(*types.Record); ok {
+			err = w.Add(typedRec)
+			if err != nil {
+				return "", 0, nil, nil, nil, fmt.Errorf("Write: %w", err)
+			}
+			n++
 		}
-		n++
 	}
 
-	// nothing to write
 	if n == 0 {
-		return "", 0, nil, nil, nil, ErrNoRecords
+		return "", 0, nil, nil, nil, api.ErrNoRecords
 	}
 
-	meta, index, filter, err = w.Write(f)
+	blobMeta, blobIndex, blobFilter, err := w.Write(f)
 	if err != nil {
 		return "", 0, nil, nil, nil, fmt.Errorf("sstable.Write: %w", err)
 	}
@@ -153,23 +138,21 @@ func (bs *Blobstore) Flush(ctx context.Context, ch <-chan *types.Record) (dest s
 		return "", 0, nil, nil, nil, fmt.Errorf("getS3: %w", err)
 	}
 
-	key := meta.Filename()
+	key := blobMeta.Filename()
 	_, err = s3c.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: &bs.bucket,
-		Key:    &key,
-		Body:   f,
-		// never overwrite sstables. they're immutable. this is only a problem
-		// if we try to put two at the same time, since they're timestamped.
+		Bucket:      &bs.bucket,
+		Key:         &key,
+		Body:        f,
 		IfNoneMatch: aws.String("*"),
 	})
 	if err != nil {
 		return "", 0, nil, nil, nil, fmt.Errorf("PutObject: %w", err)
 	}
 
-	return key, n, meta, index, filter, nil
+	return key, n, blobMeta, blobIndex, blobFilter, nil
 }
 
-func (bs *Blobstore) getS3(ctx context.Context) (*s3.Client, error) {
+func (bs *BlobStore) getS3(ctx context.Context) (*s3.Client, error) {
 	if bs.s3 != nil {
 		return bs.s3, nil
 	}
@@ -190,9 +173,6 @@ func connectToS3(ctx context.Context) (*s3.Client, error) {
 	}
 
 	return s3.NewFromConfig(cfg, func(o *s3.Options) {
-		// integration test needs this so we can just hit localhost rather than
-		// the default of bucket-name.localhost, which doesn't work. seems fine
-		// to just do this in production too.
 		o.UsePathStyle = true
 	}), nil
 }

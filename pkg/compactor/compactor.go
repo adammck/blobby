@@ -8,7 +8,6 @@ import (
 	"sort"
 
 	"github.com/adammck/blobby/pkg/api"
-	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/adammck/blobby/pkg/filter"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
@@ -18,14 +17,14 @@ import (
 )
 
 type Compactor struct {
-	bs    *blobstore.Blobstore
+	bs    api.BlobStore
 	md    *metadata.Store
 	ixs   api.IndexStore
 	fs    api.FilterStore
 	clock clockwork.Clock
 }
 
-func New(clock clockwork.Clock, bs *blobstore.Blobstore, md *metadata.Store, ixs api.IndexStore, fs api.FilterStore) *Compactor {
+func New(clock clockwork.Clock, bs api.BlobStore, md *metadata.Store, ixs api.IndexStore, fs api.FilterStore) *Compactor {
 	return &Compactor{
 		clock: clock,
 		bs:    bs,
@@ -63,9 +62,15 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 
 	readers := make([]*sstable.Reader, len(cc.Inputs))
 	for i, m := range cc.Inputs {
-		r, err := c.bs.GetFull(ctx, m.Filename())
+		body, err := c.bs.GetFull(ctx, m.Filename())
 		if err != nil {
 			stats.Error = fmt.Errorf("getSST(%s): %w", m.Filename(), err)
+			return stats
+		}
+		r, err := sstable.NewReader(body)
+		if err != nil {
+			body.Close() // TODO(adammck): this is not needed.
+			stats.Error = fmt.Errorf("NewReader(%s): %w", m.Filename(), err)
 			return stats
 		}
 		defer r.Close()
@@ -107,7 +112,16 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 
 	g.Go(func() error {
 		var err error
-		_, _, meta, idx, f, err = c.bs.Flush(ctx2, ch)
+		// Convert the record channel to interface{} channel
+		// TODO(adammck): why?
+		chanInterface := make(chan interface{})
+		go func() {
+			defer close(chanInterface)
+			for rec := range ch {
+				chanInterface <- rec
+			}
+		}()
+		_, _, meta, idx, f, err = c.bs.Flush(ctx2, chanInterface)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}
