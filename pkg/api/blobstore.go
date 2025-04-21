@@ -1,4 +1,3 @@
-// pkg/api/blobstore.go
 package api
 
 import (

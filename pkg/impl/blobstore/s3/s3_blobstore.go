@@ -1,4 +1,3 @@
-// pkg/impl/blobstore/awss3/blobstore.go
 package s3
 
 import (
