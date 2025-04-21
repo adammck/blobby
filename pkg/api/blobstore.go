@@ -9,7 +9,8 @@ import (
 	"github.com/adammck/blobby/pkg/types"
 )
 
-// ErrNoRecords is returned when attempting to flush an empty channel
+// ErrNoRecords is returned from Flush when there are no records to write, i.e.
+// the channel is empty or already closed.
 var ErrNoRecords = errors.New("NoRecords")
 
 // BlobStore defines storage operations for sstable files
