@@ -17,8 +17,7 @@ func setupManager() (context.Context, *Manager, clockwork.Clock) {
 	ctx := context.Background()
 	clock := clockwork.NewFakeClock()
 	store := mock.New() // use mock store instead of real s3
-	factory := NewFactory(clock)
-	manager := NewManager(store, clock, factory)
+	manager := NewManager(store, clock, NewFactory())
 
 	return ctx, manager, clock
 }

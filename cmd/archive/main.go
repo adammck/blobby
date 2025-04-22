@@ -39,7 +39,7 @@ func main() {
 	}
 
 	clock := clockwork.NewRealClock()
-	factory := sstable.NewFactory(clock, sstable.WithIndexEveryNRecords(32))
+	factory := sstable.NewFactory(sstable.WithIndexEveryNRecords(32))
 	b := blobby.New(ctx, mongoURL, bucket, clock, factory)
 
 	err := b.Ping(ctx)

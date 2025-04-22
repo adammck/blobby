@@ -5,21 +5,20 @@ import (
 )
 
 type Factory interface {
-	NewWriter() *Writer
+	NewWriter(clockwork.Clock) *Writer
 }
 
+// TODO(adammck): Can we get rid of this? It's just []WriterOption now.
 type DefaultFactory struct {
-	opts  []WriterOption
-	clock clockwork.Clock
+	opts []WriterOption
 }
 
-func NewFactory(clock clockwork.Clock, opts ...WriterOption) *DefaultFactory {
+func NewFactory(opts ...WriterOption) *DefaultFactory {
 	return &DefaultFactory{
-		opts:  opts,
-		clock: clock,
+		opts: opts,
 	}
 }
 
-func (f *DefaultFactory) NewWriter() *Writer {
-	return NewWriter(f.clock, f.opts...)
+func (f *DefaultFactory) NewWriter(c clockwork.Clock) *Writer {
+	return NewWriter(c, f.opts...)
 }

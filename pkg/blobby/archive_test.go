@@ -18,7 +18,7 @@ func setup(t *testing.T, clock clockwork.Clock) (context.Context, *testdeps.Env,
 	ctx := context.Background()
 	env := testdeps.New(ctx, t, testdeps.WithMongo(), testdeps.WithMinio())
 
-	sf := sstable.NewFactory(clock, sstable.WithIndexEveryNRecords(8), sstable.WithFilter("mod"))
+	sf := sstable.NewFactory(sstable.WithIndexEveryNRecords(8), sstable.WithFilter("mod"))
 	b := New(ctx, env.MongoURL(), env.S3Bucket, clock, sf)
 
 	err := b.Init(ctx)

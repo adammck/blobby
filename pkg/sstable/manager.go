@@ -70,7 +70,10 @@ func (m *Manager) Delete(ctx context.Context, key string) error {
 	return m.bs.Delete(ctx, key)
 }
 
-// Flush creates a new SST by draining the given channel of Records.
+// Flush creates a new SST by draining the given channel of Records. The
+// resulting filename can be found in meta.Filename(). It's the caller's
+// responsibility to persist the returned index and filter, so the SST can be
+// read efficiently later.
 func (m *Manager) Flush(ctx context.Context, ch <-chan *types.Record) (meta *api.BlobMeta, index []api.IndexEntry, filter filter.Filter, err error) {
 	f, err := os.CreateTemp("", "sstable-*")
 	if err != nil {
@@ -79,7 +82,7 @@ func (m *Manager) Flush(ctx context.Context, ch <-chan *types.Record) (meta *api
 	defer os.Remove(f.Name())
 	defer f.Close()
 
-	w := m.f.NewWriter()
+	w := m.f.NewWriter(m.c)
 	n := 0
 	for rec := range ch {
 		err = w.Add(rec)
