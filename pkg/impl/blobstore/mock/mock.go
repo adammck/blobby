@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"sync"
 
 	"github.com/adammck/blobby/pkg/api"
@@ -28,9 +27,9 @@ func (m *Store) Put(ctx context.Context, key string, data io.Reader) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	content, err := ioutil.ReadAll(data)
+	content, err := io.ReadAll(data)
 	if err != nil {
-		return fmt.Errorf("ReadAll: %w", err)
+		return fmt.Errorf("io.ReadAll: %w", err)
 	}
 
 	m.blobs[key] = content
@@ -62,16 +61,14 @@ func (m *Store) GetRange(ctx context.Context, key string, first, last int64) (io
 		return io.NopCloser(bytes.NewReader(nil)), nil
 	}
 
-	// treat zero end as EOF
 	if last == 0 {
 		last = int64(len(data)) - 1
-	}
-	if last < first {
+	} else if last < first {
 		return io.NopCloser(bytes.NewReader(nil)), nil
-	}
-	if last >= int64(len(data)) {
+	} else if last >= int64(len(data)) {
 		last = int64(len(data)) - 1
 	}
+
 	return io.NopCloser(bytes.NewReader(data[first : last+1])), nil
 }
 
@@ -79,10 +76,12 @@ func (m *Store) Delete(ctx context.Context, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, ok := m.blobs[key]; !ok {
+	_, ok := m.blobs[key]
+	if !ok {
 		return fmt.Errorf("blob not found: %s", key)
 	}
 
 	delete(m.blobs, key)
+
 	return nil
 }

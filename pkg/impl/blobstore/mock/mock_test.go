@@ -6,28 +6,27 @@ import (
 	"io"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestMockPutAndGet(t *testing.T) {
+func TestPutGet(t *testing.T) {
 	ctx := context.Background()
 	store := New()
 
-	// Test basic put/get
 	data := []byte("test data")
 	err := store.Put(ctx, "testkey", bytes.NewReader(data))
 	require.NoError(t, err)
 
-	reader, err := store.Get(ctx, "testkey")
+	r, err := store.Get(ctx, "testkey")
 	require.NoError(t, err)
+	defer r.Close()
 
-	gotData, err := io.ReadAll(reader)
+	got, err := io.ReadAll(r)
 	require.NoError(t, err)
-	assert.Equal(t, data, gotData)
+	require.Equal(t, data, got)
 }
 
-func TestMockGetRange(t *testing.T) {
+func TestGetRange(t *testing.T) {
 	ctx := context.Background()
 	store := New()
 
@@ -35,15 +34,16 @@ func TestMockGetRange(t *testing.T) {
 	err := store.Put(ctx, "testkey2", bytes.NewReader(data))
 	require.NoError(t, err)
 
-	reader, err := store.GetRange(ctx, "testkey2", 3, 7)
+	r, err := store.GetRange(ctx, "testkey2", 3, 7)
 	require.NoError(t, err)
+	defer r.Close()
 
-	gotData, err := io.ReadAll(reader)
+	got, err := io.ReadAll(r)
 	require.NoError(t, err)
-	assert.Equal(t, []byte("defgh"), gotData)
+	require.Equal(t, []byte("defgh"), got)
 }
 
-func TestMockGetRangeZeroEnd(t *testing.T) {
+func TestGetRangeZeroLast(t *testing.T) {
 	ctx := context.Background()
 	store := New()
 
@@ -52,31 +52,32 @@ func TestMockGetRangeZeroEnd(t *testing.T) {
 
 	r, err := store.GetRange(ctx, "k", 6, 0)
 	require.NoError(t, err)
+	defer r.Close()
 
 	got, err := io.ReadAll(r)
 	require.NoError(t, err)
-	assert.Equal(t, []byte("world"), got)
+	require.Equal(t, []byte("world"), got)
 }
 
-func TestMockDelete(t *testing.T) {
+func TestDelete(t *testing.T) {
 	ctx := context.Background()
 	store := New()
 
-	data := []byte("test data")
-	err := store.Put(ctx, "testkey3", bytes.NewReader(data))
+	data := []byte("test")
+	err := store.Put(ctx, "k", bytes.NewReader(data))
 	require.NoError(t, err)
 
-	err = store.Delete(ctx, "testkey3")
+	err = store.Delete(ctx, "k")
 	require.NoError(t, err)
 
-	_, err = store.Get(ctx, "testkey3")
-	assert.Error(t, err)
+	_, err = store.Get(ctx, "k")
+	require.Error(t, err)
 }
 
-func TestMockGetNonExistent(t *testing.T) {
+func TestGetNonExistent(t *testing.T) {
 	ctx := context.Background()
 	store := New()
 
 	_, err := store.Get(ctx, "nonexistent")
-	assert.Error(t, err)
+	require.Error(t, err)
 }

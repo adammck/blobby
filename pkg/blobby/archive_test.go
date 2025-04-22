@@ -307,7 +307,7 @@ func TestBasicWriteRead(t *testing.T) {
 
 	// check that the old sstables were deleted.
 	for _, ts := range []instant{t2, t3, t4} {
-		_, err = b.bs.GetFull(ctx, ts.sstable)
+		_, err = b.sstm.GetFull(ctx, ts.sstable)
 		require.Error(t, err)
 	}
 
@@ -396,14 +396,14 @@ func TestBasicWriteRead(t *testing.T) {
 	}, gstats)
 
 	// verify the old uncompacted sstables still exist
-	_, err = b.bs.GetFull(ctx, t5.sstable)
+	_, err = b.sstm.GetFull(ctx, t5.sstable)
 	require.NoError(t, err)
-	_, err = b.bs.GetFull(ctx, t6.sstable)
+	_, err = b.sstm.GetFull(ctx, t6.sstable)
 	require.NoError(t, err)
 
 	// verify the compacted sstables were deleted
 	for _, ins := range []instant{t7, t8} {
-		_, err = b.bs.GetFull(ctx, ins.sstable)
+		_, err = b.sstm.GetFull(ctx, ins.sstable)
 		require.Error(t, err)
 	}
 

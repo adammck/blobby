@@ -17,17 +17,17 @@ import (
 )
 
 type Compactor struct {
-	bs    *sstable.Manager
+	sstm  *sstable.Manager
 	md    *metadata.Store
 	ixs   api.IndexStore
 	fs    api.FilterStore
 	clock clockwork.Clock
 }
 
-func New(clock clockwork.Clock, bs *sstable.Manager, md *metadata.Store, ixs api.IndexStore, fs api.FilterStore) *Compactor {
+func New(clock clockwork.Clock, sstm *sstable.Manager, md *metadata.Store, ixs api.IndexStore, fs api.FilterStore) *Compactor {
 	return &Compactor{
 		clock: clock,
-		bs:    bs,
+		sstm:  sstm,
 		md:    md,
 		ixs:   ixs,
 		fs:    fs,
@@ -62,7 +62,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 
 	readers := make([]*sstable.Reader, len(cc.Inputs))
 	for i, m := range cc.Inputs {
-		r, err := c.bs.GetFull(ctx, m.Filename())
+		r, err := c.sstm.GetFull(ctx, m.Filename())
 		if err != nil {
 			stats.Error = fmt.Errorf("getSST(%s): %w", m.Filename(), err)
 			return stats
@@ -106,7 +106,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 
 	g.Go(func() error {
 		var err error
-		meta, idx, f, err = c.bs.Flush(ctx2, ch)
+		meta, idx, f, err = c.sstm.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}
@@ -172,7 +172,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 	// delete the blobs.
 
 	for _, m := range cc.Inputs {
-		c.bs.Delete(ctx, m.Filename())
+		c.sstm.Delete(ctx, m.Filename())
 		if err != nil {
 			return &api.CompactionStats{
 				Error: fmt.Errorf("blobstore.Delete(%s): %w", m.Filename(), err),

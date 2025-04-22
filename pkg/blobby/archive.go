@@ -32,7 +32,7 @@ const (
 
 type Blobby struct {
 	mt    *memtable.Memtable
-	bs    *sstable.Manager
+	sstm  *sstable.Manager
 	md    *metadata.Store
 	ixs   api.IndexStore
 	fs    api.FilterStore
@@ -50,7 +50,7 @@ type Blobby struct {
 
 var _ api.Blobby = (*Blobby)(nil)
 
-func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, factory sstable.Factory) *Blobby {
+func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, sf sstable.Factory) *Blobby {
 	db, err := connectToMongo(ctx, mongoURL)
 	if err != nil {
 		// TODO: return error, obviously
@@ -60,18 +60,16 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, fa
 	ixs := mindexstore.New(db)
 	fs := mfilterstore.New(db)
 	md := metadata.New(mongoURL)
-
-	// Create blobstore with factory
-	bs := sstable.NewManager(s3blobstore.New(bucket), clock, factory)
+	sstm := sstable.NewManager(s3blobstore.New(bucket), clock, sf)
 
 	return &Blobby{
 		mt:    memtable.New(mongoURL, clock),
-		bs:    bs,
+		sstm:  sstm,
 		md:    md,
 		ixs:   ixs,
 		fs:    fs,
 		clock: clock,
-		comp:  compactor.New(clock, bs, md, ixs, fs),
+		comp:  compactor.New(clock, sstm, md, ixs, fs),
 
 		indexes: map[string]*index.Index{},
 		filters: map[string]filter.Filter{},
@@ -169,14 +167,14 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 
 		var r *sstable.Reader
 		if rng != nil {
-			r, err = b.bs.GetRange(ctx, meta.Filename(), rng.First, rng.Last)
+			r, err = b.sstm.GetRange(ctx, meta.Filename(), rng.First, rng.Last)
 			if err != nil {
 				return nil, stats, fmt.Errorf("blobstore.GetPartial: %w", err)
 			}
 		} else {
 			// if the index couldn't be fetched, that's not ideal, but we can
 			// just read the entire sstable. hope it's not too big.
-			r, err = b.bs.GetFull(ctx, meta.Filename())
+			r, err = b.sstm.GetFull(ctx, meta.Filename())
 			if err != nil {
 				return nil, stats, fmt.Errorf("blobstore.Get: %w", err)
 			}
@@ -313,7 +311,7 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 
 	g.Go(func() error {
 		var err error
-		meta, idx, f, err = b.bs.Flush(ctx2, ch)
+		meta, idx, f, err = b.sstm.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}
