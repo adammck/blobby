@@ -43,7 +43,6 @@ func (m *FakeBlobby) Put(ctx context.Context, key string, value []byte) (string,
 func (m *FakeBlobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 	return &api.FlushStats{
 		ActiveMemtable: "model",
-		BlobName:       "model",
 		Meta:           &api.BlobMeta{},
 	}, nil
 }

@@ -86,7 +86,6 @@ func TestBasicWriteRead(t *testing.T) {
 	require.Equal(t, &api.FlushStats{
 		FlushedMemtable: t1.memtable,
 		ActiveMemtable:  t2.memtable,
-		BlobName:        t2.sstable,
 		Meta: &api.BlobMeta{
 			MinKey:  "001",
 			MaxKey:  "010",
@@ -141,7 +140,6 @@ func TestBasicWriteRead(t *testing.T) {
 	require.Equal(t, &api.FlushStats{
 		FlushedMemtable: t2.memtable,
 		ActiveMemtable:  t3.memtable,
-		BlobName:        t3.sstable,
 		Meta: &api.BlobMeta{
 			MinKey:  "011",
 			MaxKey:  "020",
@@ -203,7 +201,6 @@ func TestBasicWriteRead(t *testing.T) {
 	require.Equal(t, &api.FlushStats{
 		FlushedMemtable: t3.memtable,
 		ActiveMemtable:  t4.memtable,
-		BlobName:        t4.sstable,
 		Meta: &api.BlobMeta{
 			MinKey:  "003",
 			MaxKey:  "013",

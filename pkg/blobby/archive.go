@@ -353,7 +353,6 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 
 	// wait until the sstable is actually readable to update the stats.
 	stats.FlushedMemtable = hPrev.Name()
-	stats.BlobName = meta.Filename()
 	stats.Meta = meta
 
 	err = b.mt.Drop(ctx, hPrev.Name())

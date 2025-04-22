@@ -191,7 +191,7 @@ func (o FlushOp) Run(t *testing.T, ctx context.Context) error {
 	}
 
 	t.Logf("Flush: %d records -> %s, now active: %s",
-		stats.Meta.Count, stats.BlobName, stats.ActiveMemtable)
+		stats.Meta.Count, stats.Meta.Filename(), stats.ActiveMemtable)
 
 	return nil
 }
