@@ -84,7 +84,7 @@ func (m *Manager) Flush(ctx context.Context, ch <-chan *types.Record) (dest stri
 	for rec := range ch {
 		err = w.Add(rec)
 		if err != nil {
-			return "", 0, nil, nil, nil, fmt.Errorf("Write: %w", err)
+			return "", 0, nil, nil, nil, fmt.Errorf("sstable.Writer.Add: %w", err)
 		}
 		n++
 	}
@@ -95,18 +95,18 @@ func (m *Manager) Flush(ctx context.Context, ch <-chan *types.Record) (dest stri
 
 	meta, index, filter, err = w.Write(f)
 	if err != nil {
-		return "", 0, nil, nil, nil, fmt.Errorf("sstable.Write: %w", err)
+		return "", 0, nil, nil, nil, fmt.Errorf("sstable.Writer.Write: %w", err)
 	}
 
 	_, err = f.Seek(0, 0)
 	if err != nil {
-		return "", 0, nil, nil, nil, fmt.Errorf("Seek: %w", err)
+		return "", 0, nil, nil, nil, fmt.Errorf("File.Seek: %w", err)
 	}
 
 	key := meta.Filename()
 	err = m.bs.Put(ctx, key, f)
 	if err != nil {
-		return "", 0, nil, nil, nil, fmt.Errorf("Put: %w", err)
+		return "", 0, nil, nil, nil, fmt.Errorf("BlobStore.Put: %w", err)
 	}
 
 	return key, n, meta, index, filter, nil

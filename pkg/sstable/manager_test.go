@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupManager(t *testing.T) (context.Context, *Manager, clockwork.Clock) {
+func setupManager() (context.Context, *Manager, clockwork.Clock) {
 	ctx := context.Background()
 	clock := clockwork.NewFakeClock()
 	store := mock.New() // use mock store instead of real s3
@@ -24,7 +24,7 @@ func setupManager(t *testing.T) (context.Context, *Manager, clockwork.Clock) {
 }
 
 func TestManagerFlushEmpty(t *testing.T) {
-	ctx, manager, _ := setupManager(t)
+	ctx, manager, _ := setupManager()
 
 	ch := make(chan *types.Record)
 	close(ch)
@@ -34,7 +34,7 @@ func TestManagerFlushEmpty(t *testing.T) {
 }
 
 func TestManagerFlush(t *testing.T) {
-	ctx, manager, clock := setupManager(t)
+	ctx, manager, clock := setupManager()
 
 	ch := make(chan *types.Record)
 	go func() {
@@ -72,13 +72,13 @@ func TestManagerFlush(t *testing.T) {
 }
 
 func TestManagerGetNonExistentFile(t *testing.T) {
-	ctx, manager, _ := setupManager(t)
+	ctx, manager, _ := setupManager()
 	_, err := manager.GetFull(ctx, "nonexistent.sstable")
 	assert.Error(t, err)
 }
 
 func TestManagerPartialRead(t *testing.T) {
-	ctx, manager, clock := setupManager(t)
+	ctx, manager, clock := setupManager()
 
 	ch := make(chan *types.Record)
 	go func() {
