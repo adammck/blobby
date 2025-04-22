@@ -307,14 +307,13 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 		return nil
 	})
 
-	var dest string
 	var meta *api.BlobMeta
 	var idx []api.IndexEntry
 	var f filter.Filter
 
 	g.Go(func() error {
 		var err error
-		dest, meta, idx, f, err = b.bs.Flush(ctx2, ch)
+		meta, idx, f, err = b.bs.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}
@@ -354,7 +353,7 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 
 	// wait until the sstable is actually readable to update the stats.
 	stats.FlushedMemtable = hPrev.Name()
-	stats.BlobName = dest
+	stats.BlobName = meta.Filename()
 	stats.Meta = meta
 
 	err = b.mt.Drop(ctx, hPrev.Name())

@@ -25,6 +25,7 @@ type FlushStats struct {
 	ActiveMemtable string
 
 	// The key of the flushed sstable in the blobstore.
+	// TODO(adammck): Remove this. It's just Meta.Filename().
 	BlobName string
 
 	// Metadata about the flushed sstable.
