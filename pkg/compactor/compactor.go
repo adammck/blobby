@@ -106,7 +106,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 
 	g.Go(func() error {
 		var err error
-		_, _, meta, idx, f, err = c.bs.Flush(ctx2, ch)
+		_, meta, idx, f, err = c.bs.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}

@@ -314,7 +314,7 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 
 	g.Go(func() error {
 		var err error
-		dest, _, meta, idx, f, err = b.bs.Flush(ctx2, ch)
+		dest, meta, idx, f, err = b.bs.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}

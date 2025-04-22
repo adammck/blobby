@@ -71,10 +71,10 @@ func (m *Manager) Delete(ctx context.Context, key string) error {
 }
 
 // Flush creates a new SST by draining the given channel of Records.
-func (m *Manager) Flush(ctx context.Context, ch <-chan *types.Record) (dest string, count int, meta *api.BlobMeta, index []api.IndexEntry, filter filter.Filter, err error) {
+func (m *Manager) Flush(ctx context.Context, ch <-chan *types.Record) (dest string, meta *api.BlobMeta, index []api.IndexEntry, filter filter.Filter, err error) {
 	f, err := os.CreateTemp("", "sstable-*")
 	if err != nil {
-		return "", 0, nil, nil, nil, fmt.Errorf("CreateTemp: %w", err)
+		return "", nil, nil, nil, fmt.Errorf("CreateTemp: %w", err)
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
@@ -84,30 +84,30 @@ func (m *Manager) Flush(ctx context.Context, ch <-chan *types.Record) (dest stri
 	for rec := range ch {
 		err = w.Add(rec)
 		if err != nil {
-			return "", 0, nil, nil, nil, fmt.Errorf("sstable.Writer.Add: %w", err)
+			return "", nil, nil, nil, fmt.Errorf("sstable.Writer.Add: %w", err)
 		}
 		n++
 	}
 
 	if n == 0 {
-		return "", 0, nil, nil, nil, ErrNoRecords
+		return "", nil, nil, nil, ErrNoRecords
 	}
 
 	meta, index, filter, err = w.Write(f)
 	if err != nil {
-		return "", 0, nil, nil, nil, fmt.Errorf("sstable.Writer.Write: %w", err)
+		return "", nil, nil, nil, fmt.Errorf("sstable.Writer.Write: %w", err)
 	}
 
 	_, err = f.Seek(0, 0)
 	if err != nil {
-		return "", 0, nil, nil, nil, fmt.Errorf("File.Seek: %w", err)
+		return "", nil, nil, nil, fmt.Errorf("File.Seek: %w", err)
 	}
 
 	key := meta.Filename()
 	err = m.bs.Put(ctx, key, f)
 	if err != nil {
-		return "", 0, nil, nil, nil, fmt.Errorf("BlobStore.Put: %w", err)
+		return "", nil, nil, nil, fmt.Errorf("BlobStore.Put: %w", err)
 	}
 
-	return key, n, meta, index, filter, nil
+	return key, meta, index, filter, nil
 }

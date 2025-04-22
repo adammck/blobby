@@ -29,7 +29,7 @@ func TestManagerFlushEmpty(t *testing.T) {
 	ch := make(chan *types.Record)
 	close(ch)
 
-	_, _, _, _, _, err := manager.Flush(ctx, ch)
+	_, _, _, _, err := manager.Flush(ctx, ch)
 	assert.ErrorIs(t, err, ErrNoRecords)
 }
 
@@ -51,9 +51,9 @@ func TestManagerFlush(t *testing.T) {
 		close(ch)
 	}()
 
-	_, n, meta, idx, _, err := manager.Flush(ctx, ch)
+	_, meta, idx, _, err := manager.Flush(ctx, ch)
 	require.NoError(t, err)
-	assert.Equal(t, 2, n)
+	assert.Equal(t, 2, meta.Count)
 	assert.Equal(t, "test1", meta.MinKey)
 	assert.Equal(t, "test2", meta.MaxKey)
 
@@ -92,7 +92,7 @@ func TestManagerPartialRead(t *testing.T) {
 		close(ch)
 	}()
 
-	_, _, meta, idx, _, err := manager.Flush(ctx, ch)
+	_, meta, idx, _, err := manager.Flush(ctx, ch)
 	require.NoError(t, err)
 	require.Greater(t, len(idx), 0)
 
