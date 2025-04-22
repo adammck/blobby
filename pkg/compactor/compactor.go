@@ -172,7 +172,7 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 	// delete the blobs.
 
 	for _, m := range cc.Inputs {
-		c.sstm.Delete(ctx, m.Filename())
+		err := c.sstm.Delete(ctx, m.Filename())
 		if err != nil {
 			return &api.CompactionStats{
 				Error: fmt.Errorf("blobstore.Delete(%s): %w", m.Filename(), err),
