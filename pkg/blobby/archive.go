@@ -169,7 +169,7 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 
 		var r *sstable.Reader
 		if rng != nil {
-			r, err = b.bs.GetPartial(ctx, meta.Filename(), rng.First, rng.Last)
+			r, err = b.bs.GetRange(ctx, meta.Filename(), rng.First, rng.Last)
 			if err != nil {
 				return nil, stats, fmt.Errorf("blobstore.GetPartial: %w", err)
 			}

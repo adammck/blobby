@@ -58,15 +58,16 @@ func (s *Store) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	return output.Body, nil
 }
 
-func (s *Store) GetRange(ctx context.Context, key string, start, end int64) (io.ReadCloser, error) {
+func (s *Store) GetRange(ctx context.Context, key string, first, last int64) (io.ReadCloser, error) {
 	s3c, err := s.getS3(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	rang := fmt.Sprintf("bytes=%d-", start)
-	if end > 0 {
-		rang += fmt.Sprintf("%d", end)
+	// https://www.rfc-editor.org/rfc/rfc9110.html#name-byte-ranges
+	rang := fmt.Sprintf("bytes=%d-", first)
+	if last > 0 {
+		rang += fmt.Sprintf("%d", last)
 	}
 
 	output, err := s3c.GetObject(ctx, &s3.GetObjectInput{

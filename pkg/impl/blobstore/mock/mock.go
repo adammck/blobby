@@ -49,7 +49,7 @@ func (m *Store) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
-func (m *Store) GetRange(ctx context.Context, key string, start, end int64) (io.ReadCloser, error) {
+func (m *Store) GetRange(ctx context.Context, key string, first, last int64) (io.ReadCloser, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -58,21 +58,21 @@ func (m *Store) GetRange(ctx context.Context, key string, start, end int64) (io.
 		return nil, fmt.Errorf("blob not found: %s", key)
 	}
 
-	if start >= int64(len(data)) {
+	if first >= int64(len(data)) {
 		return io.NopCloser(bytes.NewReader(nil)), nil
 	}
 
 	// treat zero end as EOF
-	if end == 0 {
-		end = int64(len(data)) - 1
+	if last == 0 {
+		last = int64(len(data)) - 1
 	}
-	if end < start {
+	if last < first {
 		return io.NopCloser(bytes.NewReader(nil)), nil
 	}
-	if end >= int64(len(data)) {
-		end = int64(len(data)) - 1
+	if last >= int64(len(data)) {
+		last = int64(len(data)) - 1
 	}
-	return io.NopCloser(bytes.NewReader(data[start : end+1])), nil
+	return io.NopCloser(bytes.NewReader(data[first : last+1])), nil
 }
 
 func (m *Store) Delete(ctx context.Context, key string) error {

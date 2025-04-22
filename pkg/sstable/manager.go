@@ -14,55 +14,63 @@ import (
 
 var ErrNoRecords = errors.New("NoRecords")
 
+// Manager is a high-level interface for reading and writing sstables. It wraps
+// the blobstore, but reads and writes Records, not raw bytes. (It doesn't help
+// with byte offsets; see api.IndexStore for that.)
 type Manager struct {
-	store   api.BlobStore
-	clock   clockwork.Clock
-	factory Factory
+	bs api.BlobStore
+	c  clockwork.Clock
+
+	// TODO(adammck): Can we get rid of this?
+	f Factory
 }
 
-func NewManager(store api.BlobStore, clock clockwork.Clock, factory Factory) *Manager {
+func NewManager(bs api.BlobStore, c clockwork.Clock, f Factory) *Manager {
 	return &Manager{
-		store:   store,
-		clock:   clock,
-		factory: factory,
+		bs: bs,
+		c:  c,
+		f:  f,
 	}
 }
 
-// GetFull reads a single SSTable from the store.
+// GetFull reads an entire SST, one record at a time. The caller MUST close the
+// Reader to avoid leaking resources.
 func (m *Manager) GetFull(ctx context.Context, key string) (*Reader, error) {
-	body, err := m.store.Get(ctx, key)
+	rc, err := m.bs.Get(ctx, key)
 	if err != nil {
-		return nil, fmt.Errorf("Get: %w", err)
+		return nil, fmt.Errorf("BlobStore.Get: %w", err)
 	}
 
-	reader, err := NewReader(body)
+	r, err := NewReader(rc)
 	if err != nil {
 		return nil, fmt.Errorf("NewReader: %w", err)
 	}
 
-	return reader, nil
+	return r, nil
 }
 
-// GetPartial reads a byte range of an SSTable from the store.
-func (m *Manager) GetPartial(ctx context.Context, key string, first, last int64) (*Reader, error) {
+// GetRange reads a specific byte range of an SST, one record at a time. See
+// api.IndexStore to determine appropriate offsets. The caller MUST close the
+// Reader to avoid leaking resources.
+func (m *Manager) GetRange(ctx context.Context, key string, first, last int64) (*Reader, error) {
 	if first == 0 {
 		return nil, fmt.Errorf("first must be greater than zero; use GetFull")
 	}
 
-	body, err := m.store.GetRange(ctx, key, first, last)
+	rc, err := m.bs.GetRange(ctx, key, first, last)
 	if err != nil {
-		return nil, fmt.Errorf("GetRange: %w", err)
+		return nil, fmt.Errorf("BlobStore.GetRange: %w", err)
 	}
 
-	reader := NewPartialReader(body)
-	return reader, nil
+	return NewPartialReader(rc), nil
 }
 
+// Delete removes the SST with the given key.
 func (m *Manager) Delete(ctx context.Context, key string) error {
-	return m.store.Delete(ctx, key)
+	return m.bs.Delete(ctx, key)
 }
 
-// Flush writes an SSTable to the store
+// Flush creates a new SST by draining the given channel of Records.
 func (m *Manager) Flush(ctx context.Context, ch <-chan *types.Record) (dest string, count int, meta *api.BlobMeta, index []api.IndexEntry, filter filter.Filter, err error) {
 	f, err := os.CreateTemp("", "sstable-*")
 	if err != nil {
@@ -71,7 +79,7 @@ func (m *Manager) Flush(ctx context.Context, ch <-chan *types.Record) (dest stri
 	defer os.Remove(f.Name())
 	defer f.Close()
 
-	w := m.factory.NewWriter()
+	w := m.f.NewWriter()
 	n := 0
 	for rec := range ch {
 		err = w.Add(rec)
@@ -96,7 +104,7 @@ func (m *Manager) Flush(ctx context.Context, ch <-chan *types.Record) (dest stri
 	}
 
 	key := meta.Filename()
-	err = m.store.Put(ctx, key, f)
+	err = m.bs.Put(ctx, key, f)
 	if err != nil {
 		return "", 0, nil, nil, nil, fmt.Errorf("Put: %w", err)
 	}

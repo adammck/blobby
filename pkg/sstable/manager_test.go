@@ -96,7 +96,7 @@ func TestManagerPartialRead(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, len(idx), 0)
 
-	partial, err := manager.GetPartial(ctx, meta.Filename(), idx[0].Offset, 0)
+	partial, err := manager.GetRange(ctx, meta.Filename(), idx[0].Offset, 0)
 	require.NoError(t, err)
 
 	rec, err := partial.Next()
