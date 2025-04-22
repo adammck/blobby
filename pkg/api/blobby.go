@@ -24,9 +24,6 @@ type FlushStats struct {
 	// The name of the memtable that is now active, after the flush.
 	ActiveMemtable string
 
-	// The key of the flushed sstable in the blobstore.
-	BlobName string
-
 	// Metadata about the flushed sstable.
 	Meta *BlobMeta
 }

@@ -39,8 +39,8 @@ func main() {
 	}
 
 	clock := clockwork.NewRealClock()
-	factory := sstable.NewFactory(clock, sstable.WithIndexEveryNRecords(32))
-	b := blobby.New(ctx, mongoURL, bucket, clock, factory)
+	sf := sstable.NewFactory(sstable.WithIndexEveryNRecords(32))
+	b := blobby.New(ctx, mongoURL, bucket, clock, sf)
 
 	err := b.Ping(ctx)
 	if err != nil {
@@ -221,6 +221,6 @@ func cmdFlush(ctx context.Context, b *blobby.Blobby) {
 		log.Fatalf("Flush: %s", err)
 	}
 
-	fmt.Printf("Flushed %d documents to: %s\n", stats.Meta.Count, stats.BlobName)
+	fmt.Printf("Flushed %d documents to: %s\n", stats.Meta.Count, stats.Meta.Filename())
 	fmt.Printf("Active memtable is now: %s\n", stats.ActiveMemtable)
 }

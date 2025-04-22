@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
-	"github.com/adammck/blobby/pkg/blobstore"
 	"github.com/adammck/blobby/pkg/compactor"
 	"github.com/adammck/blobby/pkg/filter"
+	s3blobstore "github.com/adammck/blobby/pkg/impl/blobstore/s3"
 	mfilterstore "github.com/adammck/blobby/pkg/impl/filterstore/mongo"
 	mindexstore "github.com/adammck/blobby/pkg/impl/indexstore/mongo"
 	"github.com/adammck/blobby/pkg/index"
@@ -32,7 +32,7 @@ const (
 
 type Blobby struct {
 	mt    *memtable.Memtable
-	bs    *blobstore.Blobstore
+	sstm  *sstable.Manager
 	md    *metadata.Store
 	ixs   api.IndexStore
 	fs    api.FilterStore
@@ -50,7 +50,7 @@ type Blobby struct {
 
 var _ api.Blobby = (*Blobby)(nil)
 
-func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, factory sstable.Factory) *Blobby {
+func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, sf sstable.Factory) *Blobby {
 	db, err := connectToMongo(ctx, mongoURL)
 	if err != nil {
 		// TODO: return error, obviously
@@ -60,18 +60,16 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, fa
 	ixs := mindexstore.New(db)
 	fs := mfilterstore.New(db)
 	md := metadata.New(mongoURL)
-
-	// Create blobstore with factory
-	bs := blobstore.New(bucket, clock, factory)
+	sstm := sstable.NewManager(s3blobstore.New(bucket), clock, sf)
 
 	return &Blobby{
 		mt:    memtable.New(mongoURL, clock),
-		bs:    bs,
+		sstm:  sstm,
 		md:    md,
 		ixs:   ixs,
 		fs:    fs,
 		clock: clock,
-		comp:  compactor.New(clock, bs, md, ixs, fs),
+		comp:  compactor.New(clock, sstm, md, ixs, fs),
 
 		indexes: map[string]*index.Index{},
 		filters: map[string]filter.Filter{},
@@ -98,11 +96,6 @@ func (b *Blobby) Ping(ctx context.Context) error {
 	err := b.mt.Ping(ctx)
 	if err != nil {
 		return fmt.Errorf("memtable.Ping: %w", err)
-	}
-
-	err = b.bs.Ping(ctx)
-	if err != nil {
-		return fmt.Errorf("blobstore.Ping: %w", err)
 	}
 
 	return nil
@@ -174,14 +167,14 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 
 		var r *sstable.Reader
 		if rng != nil {
-			r, err = b.bs.GetPartial(ctx, meta.Filename(), rng.First, rng.Last)
+			r, err = b.sstm.GetRange(ctx, meta.Filename(), rng.First, rng.Last)
 			if err != nil {
 				return nil, stats, fmt.Errorf("blobstore.GetPartial: %w", err)
 			}
 		} else {
 			// if the index couldn't be fetched, that's not ideal, but we can
 			// just read the entire sstable. hope it's not too big.
-			r, err = b.bs.GetFull(ctx, meta.Filename())
+			r, err = b.sstm.GetFull(ctx, meta.Filename())
 			if err != nil {
 				return nil, stats, fmt.Errorf("blobstore.Get: %w", err)
 			}
@@ -312,14 +305,13 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 		return nil
 	})
 
-	var dest string
 	var meta *api.BlobMeta
 	var idx []api.IndexEntry
 	var f filter.Filter
 
 	g.Go(func() error {
 		var err error
-		dest, _, meta, idx, f, err = b.bs.Flush(ctx2, ch)
+		meta, idx, f, err = b.sstm.Flush(ctx2, ch)
 		if err != nil {
 			return fmt.Errorf("blobstore.Flush: %w", err)
 		}
@@ -359,7 +351,6 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 
 	// wait until the sstable is actually readable to update the stats.
 	stats.FlushedMemtable = hPrev.Name()
-	stats.BlobName = dest
 	stats.Meta = meta
 
 	err = b.mt.Drop(ctx, hPrev.Name())

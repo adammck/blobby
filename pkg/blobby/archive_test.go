@@ -18,7 +18,7 @@ func setup(t *testing.T, clock clockwork.Clock) (context.Context, *testdeps.Env,
 	ctx := context.Background()
 	env := testdeps.New(ctx, t, testdeps.WithMongo(), testdeps.WithMinio())
 
-	sf := sstable.NewFactory(clock, sstable.WithIndexEveryNRecords(8), sstable.WithFilter("mod"))
+	sf := sstable.NewFactory(sstable.WithIndexEveryNRecords(8), sstable.WithFilter("mod"))
 	b := New(ctx, env.MongoURL(), env.S3Bucket, clock, sf)
 
 	err := b.Init(ctx)
@@ -86,7 +86,6 @@ func TestBasicWriteRead(t *testing.T) {
 	require.Equal(t, &api.FlushStats{
 		FlushedMemtable: t1.memtable,
 		ActiveMemtable:  t2.memtable,
-		BlobName:        t2.sstable,
 		Meta: &api.BlobMeta{
 			MinKey:  "001",
 			MaxKey:  "010",
@@ -141,7 +140,6 @@ func TestBasicWriteRead(t *testing.T) {
 	require.Equal(t, &api.FlushStats{
 		FlushedMemtable: t2.memtable,
 		ActiveMemtable:  t3.memtable,
-		BlobName:        t3.sstable,
 		Meta: &api.BlobMeta{
 			MinKey:  "011",
 			MaxKey:  "020",
@@ -203,7 +201,6 @@ func TestBasicWriteRead(t *testing.T) {
 	require.Equal(t, &api.FlushStats{
 		FlushedMemtable: t3.memtable,
 		ActiveMemtable:  t4.memtable,
-		BlobName:        t4.sstable,
 		Meta: &api.BlobMeta{
 			MinKey:  "003",
 			MaxKey:  "013",
@@ -310,7 +307,7 @@ func TestBasicWriteRead(t *testing.T) {
 
 	// check that the old sstables were deleted.
 	for _, ts := range []instant{t2, t3, t4} {
-		_, err = b.bs.GetFull(ctx, ts.sstable)
+		_, err = b.sstm.GetFull(ctx, ts.sstable)
 		require.Error(t, err)
 	}
 
@@ -399,14 +396,14 @@ func TestBasicWriteRead(t *testing.T) {
 	}, gstats)
 
 	// verify the old uncompacted sstables still exist
-	_, err = b.bs.GetFull(ctx, t5.sstable)
+	_, err = b.sstm.GetFull(ctx, t5.sstable)
 	require.NoError(t, err)
-	_, err = b.bs.GetFull(ctx, t6.sstable)
+	_, err = b.sstm.GetFull(ctx, t6.sstable)
 	require.NoError(t, err)
 
 	// verify the compacted sstables were deleted
 	for _, ins := range []instant{t7, t8} {
-		_, err = b.bs.GetFull(ctx, ins.sstable)
+		_, err = b.sstm.GetFull(ctx, ins.sstable)
 		require.Error(t, err)
 	}
 
