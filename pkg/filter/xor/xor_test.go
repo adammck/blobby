@@ -82,6 +82,60 @@ func TestXorFilterErrors(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestXorFilterWithTombstones(t *testing.T) {
+	// Create a set of normal keys and tombstone keys
+	normalKeyCount := 1000
+	tombstoneKeyCount := 500
+
+	normalKeys := make([]string, normalKeyCount)
+	for i := 0; i < normalKeyCount; i++ {
+		normalKeys[i] = fmt.Sprintf("normal-key-%d", i)
+	}
+
+	tombstoneKeys := make([]string, tombstoneKeyCount)
+	for i := 0; i < tombstoneKeyCount; i++ {
+		tombstoneKeys[i] = fmt.Sprintf("deleted-key-%d", i)
+	}
+
+	// Combine all keys for the filter
+	allKeys := make([]string, 0, normalKeyCount+tombstoneKeyCount)
+	allKeys = append(allKeys, normalKeys...)
+	allKeys = append(allKeys, tombstoneKeys...)
+
+	// Create a filter with both normal and tombstone keys
+	f, err := Create(allKeys)
+	require.NoError(t, err)
+
+	// Verify all keys are included in the filter - both normal and tombstone keys
+	// Sample some keys to keep test runtime reasonable
+	for i := 0; i < normalKeyCount; i += 100 {
+		require.True(t, f.Contains(normalKeys[i]), "Filter should contain normal key: %s", normalKeys[i])
+	}
+
+	for i := 0; i < tombstoneKeyCount; i += 50 {
+		require.True(t, f.Contains(tombstoneKeys[i]), "Filter should contain tombstone key: %s", tombstoneKeys[i])
+	}
+
+	// The filter should have similar false positive behavior for both types of keys
+	// since it doesn't distinguish between them
+	falsePositiveCount := 0
+	testCount := 1000
+
+	for i := 0; i < testCount; i++ {
+		nonExistentKey := fmt.Sprintf("not-in-filter-key-%d", i+10000)
+		if f.Contains(nonExistentKey) {
+			falsePositiveCount++
+		}
+	}
+
+	falsePositiveRate := float64(falsePositiveCount) / float64(testCount)
+	t.Logf("False positive rate for random keys: %.4f (%d out of %d)",
+		falsePositiveRate, falsePositiveCount, testCount)
+
+	// XOR filters typically have a low false positive rate
+	require.Less(t, falsePositiveRate, 0.01, "False positive rate should be reasonable")
+}
+
 func BenchmarkXorFilterSize(b *testing.B) {
 	keyCounts := []int{1000, 10000, 100000, 1000000}
 

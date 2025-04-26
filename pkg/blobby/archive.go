@@ -116,7 +116,11 @@ func (b *Blobby) Init(ctx context.Context) error {
 }
 
 func (b *Blobby) Put(ctx context.Context, key string, value []byte) (string, error) {
-	return b.mt.Put(ctx, key, value)
+	return b.mt.Put(ctx, key, value, false)
+}
+
+func (b *Blobby) Delete(ctx context.Context, key string) (string, error) {
+	return b.mt.Put(ctx, key, nil, true)
 }
 
 // TODO: return the Record, or maybe the timestamp too, not just the value.
@@ -130,6 +134,12 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 	if rec != nil {
 		// TODO: Update Memtable.Get to return stats too.
 		stats.Source = src
+
+		// If this is a tombstone record, return nil as if the key doesn't exist
+		if rec.Tombstone {
+			return nil, stats, nil
+		}
+
 		return rec.Document, stats, nil
 	}
 
@@ -193,6 +203,12 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 		stats.RecordsScanned += scanned
 
 		if rec != nil {
+			// If this is a tombstone record, return nil as if the key doesn't exist
+			if rec.Tombstone {
+				stats.Source = meta.Filename()
+				return nil, stats, nil
+			}
+
 			// return as soon as we find the first record, but that's wrong!
 			// before returning, we need to look at the record timestamp, and
 			// check whether any of the remaining metas have a minTime newer
@@ -258,13 +274,15 @@ func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error
 // Scan reads from the given sstable reader until it finds a record with the
 // given key. If EOF is reached, nil is returned. For efficiency, the reader
 // should already be *near* the record by using an index.
+//
+// The scan returns the newest record with the given key. If a tombstone record
+// with the given key is found, it is returned unless there's a newer non-tombstone
+// record with the same key. This allows tombstones to mask older versions.
 func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (*types.Record, int, error) {
-	var rec *types.Record
 	var scanned int
-	var err error
 
 	for {
-		rec, err = reader.Next()
+		rec, err := reader.Next()
 		if err != nil {
 			return nil, scanned, fmt.Errorf("sstable.Reader.Next: %w", err)
 		}
@@ -276,11 +294,15 @@ func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (
 		scanned++
 
 		if rec.Key == key {
-			break
+			// Records are sorted by key asc, then timestamp desc within each key,
+			// so the first match will be the newest. We can return immediately.
+			return rec, scanned, nil
+		} else if rec.Key > key {
+			// We've moved past our key, and since the sstable is ordered by key,
+			// we won't find any more records with our key
+			return nil, scanned, nil
 		}
 	}
-
-	return rec, scanned, nil
 }
 
 func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {

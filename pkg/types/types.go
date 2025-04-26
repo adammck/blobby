@@ -12,11 +12,20 @@ import (
 type Record struct {
 	Key       string    `bson:"key"`
 	Timestamp time.Time `bson:"ts"`
-	Document  []byte    `bson:"doc"`
+	Document  []byte    `bson:"doc,omitempty"`
+	Tombstone bool      `bson:"tombstone"`
 }
 
 func (r *Record) Write(out io.Writer) (int, error) {
-	b, err := bson.Marshal(r)
+	// Create a copy of the record to avoid modifying the original
+	rec := *r
+
+	// If it's a tombstone record, ensure Document is nil
+	if rec.Tombstone {
+		rec.Document = nil
+	}
+
+	b, err := bson.Marshal(&rec)
 	if err != nil {
 		return 0, err
 	}
@@ -36,6 +45,11 @@ func Read(r io.Reader) (*Record, error) {
 	rec := &Record{}
 	if err := bson.Unmarshal(b, rec); err != nil {
 		return nil, err
+	}
+
+	// If it's a tombstone record, ensure Document is nil
+	if rec.Tombstone && len(rec.Document) == 0 {
+		rec.Document = nil
 	}
 
 	return rec, nil
