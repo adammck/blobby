@@ -22,6 +22,7 @@ var (
 
 	pGet     = flag.Int("pget", 200, "probability of get")
 	pPut     = flag.Int("pput", 200, "probability of put")
+	pDelete  = flag.Int("pdelete", 50, "probability of delete")
 	pFlush   = flag.Int("pflush", 10, "probability of flush")
 	pCompact = flag.Int("pcompact", 1, "probability of compaction")
 
@@ -46,6 +47,7 @@ type chaosTestConfig struct {
 	numOps    int
 	pGet      int
 	pPut      int
+	pDelete   int
 	pFlush    int
 	pCompact  int
 	pHot      int
@@ -63,6 +65,7 @@ func configFromFlags() chaosTestConfig {
 		numOps:    *numOps,
 		pGet:      *pGet,
 		pPut:      *pPut,
+		pDelete:   *pDelete,
 		pFlush:    *pFlush,
 		pCompact:  *pCompact,
 		pHot:      *pHot,
@@ -96,7 +99,7 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 	}
 
 	t.Logf("Spamming %d random ops....", cfg.numOps)
-	totalOps := cfg.pGet + cfg.pPut + cfg.pFlush + cfg.pCompact
+	totalOps := cfg.pGet + cfg.pPut + cfg.pDelete + cfg.pFlush + cfg.pCompact
 	for i := range cfg.numOps {
 		var op testutil.Op
 		p := rnd.Intn(totalOps)
@@ -110,7 +113,10 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 			val := fmt.Appendf(nil, "value-%s-v%05d-r%d", key, i, rnd.Int())
 			op = th.Put(key, val)
 
-		case p < cfg.pGet+cfg.pPut+cfg.pFlush:
+		case p < cfg.pGet+cfg.pPut+cfg.pDelete:
+			op = th.Delete(selectKey(cfg, rnd))
+
+		case p < cfg.pGet+cfg.pPut+cfg.pDelete+cfg.pFlush:
 			op = th.Flush()
 
 		default:

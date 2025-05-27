@@ -57,17 +57,29 @@ func (h *Harness) Verify(ctx context.Context, t *testing.T) {
 	var verified int
 
 	for key := range h.keys {
-		expected, _, err := h.model.Get(ctx, key)
-		require.NoError(t, err)
+		expected, _, expectedErr := h.model.Get(ctx, key)
+		actual, stats, actualErr := h.sut.Get(ctx, key)
 
-		actual, stats, err := h.sut.Get(ctx, key)
-		require.NoError(t, err)
+		// both should have the same error state
+		if expectedErr != nil && actualErr != nil {
+			// both should be NotFound errors
+			var expectedNotFound, actualNotFound *api.NotFound
+			require.ErrorAs(t, expectedErr, &expectedNotFound, "expected NotFound error from model")
+			require.ErrorAs(t, actualErr, &actualNotFound, "expected NotFound error from sut")
+			require.Equal(t, expectedNotFound.Key, actualNotFound.Key, "NotFound keys should match")
+		} else if expectedErr != nil || actualErr != nil {
+			require.NoError(t, expectedErr, "model error should match sut error")
+			require.NoError(t, actualErr, "sut error should match model error")
+		} else {
+			// both succeeded, values should match
+			require.Equal(t, expected, actual,
+				"key %s: expected %q, got %q from %s",
+				key, expected, actual, stats.Source)
+		}
 
-		require.Equal(t, expected, actual,
-			"key %s: expected %q, got %q from %s",
-			key, expected, actual, stats.Source)
-
-		h.stats.Incr(stats)
+		if actualErr == nil {
+			h.stats.Incr(stats)
+		}
 		verified++
 	}
 
