@@ -3,21 +3,23 @@ package testutil
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/adammck/blobby/pkg/api"
+	"github.com/jonboulle/clockwork"
 )
 
 type FakeBlobby struct {
-	data map[string][]byte
-	mu   sync.RWMutex
+	data  map[string][]byte
+	mu    sync.RWMutex
+	clock clockwork.Clock
 }
 
 var _ api.Blobby = (*FakeBlobby)(nil)
 
 func NewFakeBlobby() *FakeBlobby {
 	return &FakeBlobby{
-		data: make(map[string][]byte),
+		data:  make(map[string][]byte),
+		clock: clockwork.NewRealClock(),
 	}
 }
 
@@ -46,7 +48,7 @@ func (m *FakeBlobby) Delete(ctx context.Context, key string) (*api.DeleteStats, 
 
 	m.data[key] = nil // nil represents a tombstone
 	return &api.DeleteStats{
-		Timestamp:   time.Now(),
+		Timestamp:   m.clock.Now(),
 		Destination: "model",
 	}, nil
 }

@@ -147,12 +147,10 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 		return nil, stats, fmt.Errorf("memtable.Get: %w", err)
 	}
 	if rec != nil {
-		// check if this is a tombstone
+		stats.Source = src
 		if rec.Tombstone {
 			return nil, stats, &api.NotFound{Key: key}
 		}
-		// TODO: Update Memtable.Get to return stats too.
-		stats.Source = src
 		return rec.Document, stats, nil
 	}
 

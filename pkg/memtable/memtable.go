@@ -98,12 +98,11 @@ func (mt *Memtable) getOneColl(ctx context.Context, db *mongo.Database, coll, ke
 }
 
 func (mt *Memtable) Put(ctx context.Context, key string, value []byte) (string, error) {
-	rec := &types.Record{
+	return mt.PutRecord(ctx, &types.Record{
 		Key:       key,
 		Timestamp: mt.clock.Now(),
 		Document:  value,
-	}
-	return mt.PutRecord(ctx, rec)
+	})
 }
 
 func (mt *Memtable) PutRecord(ctx context.Context, rec *types.Record) (string, error) {

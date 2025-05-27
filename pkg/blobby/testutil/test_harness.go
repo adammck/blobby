@@ -157,17 +157,16 @@ func (o GetOp) String() string {
 func (o GetOp) Run(t *testing.T, ctx context.Context) error {
 	val, stats, err := o.h.sut.Get(ctx, o.k)
 	if err != nil {
-		// check if it's a NotFound error - that's expected for deleted/missing keys
-		if errors.Is(err, &api.NotFound{}) {
-			// verify model also returns not found
-			_, _, modelErr := o.h.model.Get(ctx, o.k)
-			if !errors.Is(modelErr, &api.NotFound{}) {
-				return fmt.Errorf("sut returned NotFound but model did not: sut=%v, model=%v", err, modelErr)
-			}
-			t.Logf("Get %s -> NotFound (expected)", o.k)
-			return nil
+		if !errors.Is(err, &api.NotFound{}) {
+			return fmt.Errorf("get: %v", err)
 		}
-		return fmt.Errorf("get: %v", err)
+		
+		_, _, modelErr := o.h.model.Get(ctx, o.k)
+		if !errors.Is(modelErr, &api.NotFound{}) {
+			return fmt.Errorf("sut returned NotFound but model did not: sut=%v, model=%v", err, modelErr)
+		}
+		t.Logf("Get %s -> NotFound (expected)", o.k)
+		return nil
 	}
 
 	// compare with model

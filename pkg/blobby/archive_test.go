@@ -553,6 +553,33 @@ func TestDeleteWithCompaction(t *testing.T) {
 	require.Equal(t, []byte("value3"), val)
 }
 
+func TestDeleteReturnsStatsWithSource(t *testing.T) {
+	ts := time.Now().UTC().Truncate(time.Second)
+	c := clockwork.NewFakeClockAt(ts)
+	ctx, _, b := setup(t, c)
+
+	tb := &testBlobby{
+		ctx: ctx,
+		c:   c,
+		t:   t,
+		b:   b,
+	}
+
+	// put then delete a key
+	c.Advance(15 * time.Millisecond)
+	memtableName := tb.put("test-key", []byte("test-value"))
+	c.Advance(15 * time.Millisecond)
+	tb.delete("test-key")
+
+	// get should return notfound with stats showing the memtable source
+	_, stats, err := b.Get(ctx, "test-key")
+	require.Error(t, err)
+	var notFound *api.NotFound
+	require.ErrorAs(t, err, &notFound)
+	require.Equal(t, "test-key", notFound.Key)
+	require.Equal(t, memtableName, stats.Source, "stats should include the memtable where tombstone was found")
+}
+
 type testBlobby struct {
 	ctx context.Context
 	c   *clockwork.FakeClock

@@ -11,17 +11,12 @@ type NotFound struct {
 }
 
 func (e *NotFound) Error() string {
-	return fmt.Sprintf("key not found: %s", e.Key)
+	return fmt.Sprintf("not found: %s", e.Key)
 }
 
 func (e *NotFound) Is(err error) bool {
 	_, ok := err.(*NotFound)
 	return ok
-}
-
-type DeleteStats struct {
-	Timestamp   time.Time
-	Destination string
 }
 
 type GetStats struct {
@@ -33,6 +28,12 @@ type GetStats struct {
 
 // TODO: Implement PutStats
 type PutStats struct {
+}
+
+// DeleteStats contains metadata about a delete operation.
+type DeleteStats struct {
+	Timestamp   time.Time
+	Destination string
 }
 
 type FlushStats struct {
