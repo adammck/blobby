@@ -42,10 +42,6 @@ func Unmarshal(f api.Filter) (*Filter, error) {
 }
 
 func Create(keys []string) (*Filter, error) {
-	if len(keys) == 0 {
-		return nil, errors.New("empty key set")
-	}
-
 	km := make(map[string]struct{})
 	for _, key := range keys {
 		km[key] = struct{}{}

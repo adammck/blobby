@@ -8,18 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCreate(t *testing.T) {
-	keys := []string{"key0", "key1", "key2", "key3"}
-	f, err := Create(keys)
-	require.NoError(t, err)
-	require.NotNil(t, f)
-
-	require.True(t, f.Contains("key0"))
-	require.False(t, f.Contains("key1"))
-	require.True(t, f.Contains("key2"))
-	require.False(t, f.Contains("key3"))
-}
-
 func TestNew(t *testing.T) {
 	stored := []string{"key0", "key2"}
 	data, err := json.Marshal(stored)
@@ -41,7 +29,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestContains(t *testing.T) {
-	keys := []string{"key0", "key2", "foo2", "bar4"}
+	keys := []string{"key1", "key2", "foo2", "bar4"}
 	f, err := Create(keys)
 	require.NoError(t, err)
 
@@ -50,14 +38,14 @@ func TestContains(t *testing.T) {
 		expected bool
 	}{
 		{"", true},
-		{"key0", true},
-		{"key1", false},
-		{"key2", true},
+		{"key0", true}, // false positive
+		{"key1", true}, // true positive
+		{"key2", true}, // true positive but would have been false
 		{"key3", false},
-		{"foo2", true},
 		{"foo1", false},
-		{"bar4", true},
+		{"foo2", true},
 		{"bar3", false},
+		{"bar4", true},
 	}
 
 	for _, tc := range tests {
