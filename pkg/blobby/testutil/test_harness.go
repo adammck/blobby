@@ -196,7 +196,7 @@ func (o DeleteOp) String() string {
 }
 
 func (o DeleteOp) Run(t *testing.T, ctx context.Context) error {
-	stats, err := o.h.sut.Delete(ctx, o.k)
+	dest, err := o.h.sut.Delete(ctx, o.k)
 	if err != nil {
 		return fmt.Errorf("delete: %v", err)
 	}
@@ -206,7 +206,7 @@ func (o DeleteOp) Run(t *testing.T, ctx context.Context) error {
 		return fmt.Errorf("model delete: %v", err)
 	}
 
-	t.Logf("Delete %s -> %v", o.k, stats.Timestamp)
+	t.Logf("Delete %s -> %s", o.k, dest)
 
 	return nil
 }

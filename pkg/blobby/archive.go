@@ -119,7 +119,7 @@ func (b *Blobby) Put(ctx context.Context, key string, value []byte) (string, err
 	return b.mt.Put(ctx, key, value)
 }
 
-func (b *Blobby) Delete(ctx context.Context, key string) (*api.DeleteStats, error) {
+func (b *Blobby) Delete(ctx context.Context, key string) (string, error) {
 	rec := &types.Record{
 		Key:       key,
 		Timestamp: b.clock.Now(),
@@ -127,14 +127,12 @@ func (b *Blobby) Delete(ctx context.Context, key string) (*api.DeleteStats, erro
 		Tombstone: true,
 	}
 
-	_, err := b.mt.PutRecord(ctx, rec)
+	dest, err := b.mt.PutRecord(ctx, rec)
 	if err != nil {
-		return nil, fmt.Errorf("memtable.PutRecord: %w", err)
+		return "", fmt.Errorf("memtable.PutRecord: %w", err)
 	}
 
-	return &api.DeleteStats{
-		Timestamp: rec.Timestamp,
-	}, nil
+	return dest, nil
 }
 
 // TODO: return the Record, or maybe the timestamp too, not just the value.
