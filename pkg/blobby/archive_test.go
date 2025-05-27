@@ -413,9 +413,149 @@ func TestBasicWriteRead(t *testing.T) {
 	//  - [201, 302] at t9
 }
 
+func TestDelete(t *testing.T) {
+	ts := time.Now().UTC().Truncate(time.Second)
+	c := clockwork.NewFakeClockAt(ts)
+	ctx, _, b := setup(t, c)
+
+	tb := &testBlobby{
+		ctx: ctx,
+		c:   c,
+		t:   t,
+		b:   b,
+	}
+
+	// put some records first
+	c.Advance(15 * time.Millisecond)
+	tb.put("key1", []byte("value1"))
+	c.Advance(15 * time.Millisecond)
+	tb.put("key2", []byte("value2"))
+	c.Advance(15 * time.Millisecond)
+	tb.put("key3", []byte("value3"))
+
+	// verify they exist
+	val, _ := tb.get("key1")
+	require.Equal(t, []byte("value1"), val)
+	val, _ = tb.get("key2")
+	require.Equal(t, []byte("value2"), val)
+	val, _ = tb.get("key3")
+	require.Equal(t, []byte("value3"), val)
+
+	// delete key2
+	c.Advance(15 * time.Millisecond)
+	tb.delete("key2")
+
+	// key1 and key3 should still exist
+	val, _ = tb.get("key1")
+	require.Equal(t, []byte("value1"), val)
+	val, _ = tb.get("key3")
+	require.Equal(t, []byte("value3"), val)
+
+	// key2 should return NotFound
+	tb.getNotFound("key2")
+
+	// delete non-existent key should work (idempotent)
+	c.Advance(15 * time.Millisecond)
+	tb.delete("nonexistent")
+	tb.getNotFound("nonexistent")
+
+	// put after delete should work
+	c.Advance(15 * time.Millisecond)
+	tb.put("key2", []byte("new_value2"))
+	val, _ = tb.get("key2")
+	require.Equal(t, []byte("new_value2"), val)
+
+	// delete again
+	c.Advance(15 * time.Millisecond)
+	tb.delete("key2")
+	tb.getNotFound("key2")
+}
+
+func TestDeleteWithFlush(t *testing.T) {
+	ts := time.Now().UTC().Truncate(time.Second)
+	c := clockwork.NewFakeClockAt(ts)
+	ctx, _, b := setup(t, c)
+
+	tb := &testBlobby{
+		ctx: ctx,
+		c:   c,
+		t:   t,
+		b:   b,
+	}
+
+	// put and delete in memtable
+	c.Advance(15 * time.Millisecond)
+	tb.put("key1", []byte("value1"))
+	c.Advance(15 * time.Millisecond)
+	tb.delete("key1")
+	tb.getNotFound("key1")
+
+	// flush should preserve tombstone
+	tb.flush()
+	tb.getNotFound("key1")
+
+	// put new value with same key
+	c.Advance(15 * time.Millisecond)
+	tb.put("key1", []byte("new_value"))
+	val, _ := tb.get("key1")
+	require.Equal(t, []byte("new_value"), val)
+
+	// flush again
+	tb.flush()
+	val, _ = tb.get("key1")
+	require.Equal(t, []byte("new_value"), val)
+}
+
+func TestDeleteWithCompaction(t *testing.T) {
+	ts := time.Now().UTC().Truncate(time.Second)
+	c := clockwork.NewFakeClockAt(ts)
+	ctx, _, b := setup(t, c)
+
+	tb := &testBlobby{
+		ctx: ctx,
+		c:   c,
+		t:   t,
+		b:   b,
+	}
+
+	// create some data across multiple sstables
+	c.Advance(15 * time.Millisecond)
+	tb.put("key1", []byte("value1"))
+	c.Advance(15 * time.Millisecond)
+	tb.put("key2", []byte("value2"))
+	tb.flush()
+
+	// advance time and create more data
+	c.Advance(1 * time.Hour)
+	c.Advance(15 * time.Millisecond)
+	tb.put("key3", []byte("value3"))
+	c.Advance(15 * time.Millisecond)
+	tb.delete("key1") // delete key1
+	tb.flush()
+
+	// verify state before compaction
+	tb.getNotFound("key1")
+	val, _ := tb.get("key2")
+	require.Equal(t, []byte("value2"), val)
+	val, _ = tb.get("key3")
+	require.Equal(t, []byte("value3"), val)
+
+	// compact all sstables
+	c.Advance(1 * time.Hour)
+	_, err := b.Compact(ctx, api.CompactionOptions{})
+	require.NoError(t, err)
+
+	// verify tombstone is preserved after compaction
+	tb.getNotFound("key1")
+	val, _ = tb.get("key2")
+	require.Equal(t, []byte("value2"), val)
+	val, _ = tb.get("key3")
+	require.Equal(t, []byte("value3"), val)
+}
+
 type testBlobby struct {
 	ctx context.Context
-	c   clockwork.Clock
+	c   *clockwork.FakeClock
 	t   *testing.T
 	b   *Blobby
 }
@@ -430,6 +570,24 @@ func (ta *testBlobby) get(key string) ([]byte, *api.GetStats) {
 	val, stats, err := ta.b.Get(ta.ctx, key)
 	require.NoError(ta.t, err)
 	return val, stats
+}
+
+func (ta *testBlobby) delete(key string) {
+	_, err := ta.b.Delete(ta.ctx, key)
+	require.NoError(ta.t, err)
+}
+
+func (ta *testBlobby) getNotFound(key string) {
+	_, _, err := ta.b.Get(ta.ctx, key)
+	require.Error(ta.t, err)
+	var notFound *api.NotFound
+	require.ErrorAs(ta.t, err, &notFound)
+	require.Equal(ta.t, key, notFound.Key)
+}
+
+func (ta *testBlobby) flush() {
+	_, err := ta.b.Flush(ta.ctx)
+	require.NoError(ta.t, err)
 }
 
 type instant struct {

@@ -13,6 +13,7 @@ type Record struct {
 	Key       string    `bson:"key"`
 	Timestamp time.Time `bson:"ts"`
 	Document  []byte    `bson:"doc"`
+	Tombstone bool      `bson:"tombstone,omitempty"`
 }
 
 func (r *Record) Write(out io.Writer) (int, error) {

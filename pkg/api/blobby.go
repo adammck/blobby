@@ -2,8 +2,26 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
+
+type NotFound struct {
+	Key string
+}
+
+func (e *NotFound) Error() string {
+	return fmt.Sprintf("key not found: %s", e.Key)
+}
+
+func (e *NotFound) Is(err error) bool {
+	_, ok := err.(*NotFound)
+	return ok
+}
+
+type DeleteStats struct {
+	Timestamp time.Time
+}
 
 type GetStats struct {
 	Source         string
@@ -105,4 +123,5 @@ type Blobby interface {
 	Get(ctx context.Context, key string) ([]byte, *GetStats, error)
 	Flush(ctx context.Context) (*FlushStats, error)
 	Compact(ctx context.Context, opts CompactionOptions) ([]*CompactionStats, error)
+	Delete(ctx context.Context, key string) (*DeleteStats, error)
 }
