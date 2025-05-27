@@ -8,6 +8,8 @@ import (
 	"github.com/jonboulle/clockwork"
 )
 
+var tombstone []byte = nil
+
 type FakeBlobby struct {
 	data  map[string][]byte
 	mu    sync.RWMutex
@@ -28,6 +30,7 @@ func (m *FakeBlobby) Get(ctx context.Context, key string) ([]byte, *api.GetStats
 	defer m.mu.RUnlock()
 
 	val, exists := m.data[key]
+	// key doesn't exist or key was deleted (tombstone)
 	if !exists || val == nil {
 		return nil, &api.GetStats{}, &api.NotFound{Key: key}
 	}
@@ -46,7 +49,7 @@ func (m *FakeBlobby) Delete(ctx context.Context, key string) (*api.DeleteStats, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.data[key] = nil // nil represents a tombstone
+	m.data[key] = tombstone
 	return &api.DeleteStats{
 		Timestamp:   m.clock.Now(),
 		Destination: "model",

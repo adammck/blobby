@@ -13,7 +13,7 @@ type Record struct {
 	Key       string    `bson:"key"`
 	Timestamp time.Time `bson:"ts"`
 	Document  []byte    `bson:"doc"`
-	Tombstone bool      `bson:"tombstone,omitempty"`
+	Tombstone bool      `bson:"tombstone,omitempty"` // true if this record represents a deletion
 }
 
 func (r *Record) Write(out io.Writer) (int, error) {

@@ -122,7 +122,6 @@ func (b *Blobby) Put(ctx context.Context, key string, value []byte) (string, err
 func (b *Blobby) Delete(ctx context.Context, key string) (*api.DeleteStats, error) {
 	rec := &types.Record{
 		Key:       key,
-		Timestamp: b.clock.Now(),
 		Document:  nil,
 		Tombstone: true,
 	}
@@ -215,7 +214,6 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 
 		if rec != nil {
 			stats.Source = meta.Filename()
-			// check if this is a tombstone
 			if rec.Tombstone {
 				return nil, stats, &api.NotFound{Key: key}
 			}

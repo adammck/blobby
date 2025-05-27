@@ -156,11 +156,11 @@ func (o GetOp) String() string {
 
 func (o GetOp) Run(t *testing.T, ctx context.Context) error {
 	val, stats, err := o.h.sut.Get(ctx, o.k)
-	if err != nil {
-		if !errors.Is(err, &api.NotFound{}) {
-			return fmt.Errorf("get: %v", err)
-		}
-		
+	if err != nil && !errors.Is(err, &api.NotFound{}) {
+		return fmt.Errorf("get: %v", err)
+	}
+	
+	if errors.Is(err, &api.NotFound{}) {
 		_, _, modelErr := o.h.model.Get(ctx, o.k)
 		if !errors.Is(modelErr, &api.NotFound{}) {
 			return fmt.Errorf("sut returned NotFound but model did not: sut=%v, model=%v", err, modelErr)
@@ -197,12 +197,12 @@ func (o DeleteOp) String() string {
 func (o DeleteOp) Run(t *testing.T, ctx context.Context) error {
 	stats, err := o.h.sut.Delete(ctx, o.k)
 	if err != nil {
-		return fmt.Errorf("delete: %v", err)
+		return fmt.Errorf("sut.Delete: %v", err)
 	}
 
 	_, err = o.h.model.Delete(ctx, o.k)
 	if err != nil {
-		return fmt.Errorf("model delete: %v", err)
+		return fmt.Errorf("model.Delete: %v", err)
 	}
 
 	t.Logf("Delete %s -> %s", o.k, stats.Destination)
