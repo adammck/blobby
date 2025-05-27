@@ -452,14 +452,14 @@ func TestDelete(t *testing.T) {
 	require.Equal(t, []byte("value3"), val)
 
 	// key2 should return NotFound
-	val, stats, err := tb.b.Get(tb.ctx, "key2")
-	tb.requireNotFound(val, stats, err, "key2")
+	_, _, err := tb.tryGet("key2")
+	tb.requireNotFound(err, "key2")
 
 	// delete non-existent key should work (idempotent)
 	c.Advance(15 * time.Millisecond)
 	tb.delete("nonexistent")
-	val, stats, err = tb.b.Get(tb.ctx, "nonexistent")
-	tb.requireNotFound(val, stats, err, "nonexistent")
+	_, _, err = tb.tryGet("nonexistent")
+	tb.requireNotFound(err, "nonexistent")
 
 	// put after delete should work
 	c.Advance(15 * time.Millisecond)
@@ -470,8 +470,8 @@ func TestDelete(t *testing.T) {
 	// delete again
 	c.Advance(15 * time.Millisecond)
 	tb.delete("key2")
-	val, stats, err = tb.b.Get(tb.ctx, "key2")
-	tb.requireNotFound(val, stats, err, "key2")
+	_, _, err = tb.tryGet("key2")
+	tb.requireNotFound(err, "key2")
 }
 
 func TestDeleteWithFlush(t *testing.T) {
@@ -491,18 +491,18 @@ func TestDeleteWithFlush(t *testing.T) {
 	tb.put("key1", []byte("value1"))
 	c.Advance(15 * time.Millisecond)
 	tb.delete("key1")
-	val, stats, err := tb.b.Get(tb.ctx, "key1")
-	tb.requireNotFound(val, stats, err, "key1")
+	_, _, err := tb.tryGet("key1")
+	tb.requireNotFound(err, "key1")
 
 	// flush should preserve tombstone
 	tb.flush()
-	val, stats, err = tb.b.Get(tb.ctx, "key1")
-	tb.requireNotFound(val, stats, err, "key1")
+	_, _, err = tb.tryGet("key1")
+	tb.requireNotFound(err, "key1")
 
 	// put new value with same key
 	c.Advance(15 * time.Millisecond)
 	tb.put("key1", []byte("new_value"))
-	val, _ = tb.get("key1")
+	val, _ := tb.get("key1")
 	require.Equal(t, []byte("new_value"), val)
 
 	// flush again
@@ -539,9 +539,9 @@ func TestDeleteWithCompaction(t *testing.T) {
 	tb.flush()
 
 	// verify state before compaction
-	val, stats, err := tb.b.Get(tb.ctx, "key1")
-	tb.requireNotFound(val, stats, err, "key1")
-	val, _ = tb.get("key2")
+	_, _, err := tb.tryGet("key1")
+	tb.requireNotFound(err, "key1")
+	val, _ := tb.get("key2")
 	require.Equal(t, []byte("value2"), val)
 	val, _ = tb.get("key3")
 	require.Equal(t, []byte("value3"), val)
@@ -552,8 +552,8 @@ func TestDeleteWithCompaction(t *testing.T) {
 	require.NoError(t, err)
 
 	// verify tombstone is preserved after compaction
-	val, stats, err = tb.b.Get(tb.ctx, "key1")
-	tb.requireNotFound(val, stats, err, "key1")
+	_, _, err = tb.tryGet("key1")
+	tb.requireNotFound(err, "key1")
 	val, _ = tb.get("key2")
 	require.Equal(t, []byte("value2"), val)
 	val, _ = tb.get("key3")
@@ -634,13 +634,17 @@ func (ta *testBlobby) get(key string) ([]byte, *api.GetStats) {
 	return val, stats
 }
 
+func (ta *testBlobby) tryGet(key string) ([]byte, *api.GetStats, error) {
+	return ta.b.Get(ta.ctx, key)
+}
+
 func (ta *testBlobby) delete(key string) *api.DeleteStats {
 	stats, err := ta.b.Delete(ta.ctx, key)
 	require.NoError(ta.t, err)
 	return stats
 }
 
-func (ta *testBlobby) requireNotFound(val []byte, stats *api.GetStats, err error, expectedKey string) {
+func (ta *testBlobby) requireNotFound(err error, expectedKey string) {
 	require.Error(ta.t, err)
 	var notFound *api.NotFound
 	require.ErrorAs(ta.t, err, &notFound)
