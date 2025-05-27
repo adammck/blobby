@@ -3,6 +3,7 @@ package testutil
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/adammck/blobby/pkg/api"
 )
@@ -39,12 +40,15 @@ func (m *FakeBlobby) Put(ctx context.Context, key string, value []byte) (string,
 	return "model", nil
 }
 
-func (m *FakeBlobby) Delete(ctx context.Context, key string) (string, error) {
+func (m *FakeBlobby) Delete(ctx context.Context, key string) (*api.DeleteStats, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.data[key] = nil // nil represents a tombstone
-	return "model", nil
+	return &api.DeleteStats{
+		Timestamp:   time.Now(),
+		Destination: "model",
+	}, nil
 }
 
 // No-op but returns valid stats structure
