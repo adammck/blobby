@@ -60,22 +60,23 @@ func (h *Harness) Verify(ctx context.Context, t *testing.T) {
 		expected, _, expectedErr := h.model.Get(ctx, key)
 		actual, stats, actualErr := h.sut.Get(ctx, key)
 
-		// both should have the same error state
-		if expectedErr != nil && actualErr != nil {
-			// both should be NotFound errors
-			var expectedNotFound, actualNotFound *api.NotFound
-			require.ErrorAs(t, expectedErr, &expectedNotFound, "expected NotFound error from model")
-			require.ErrorAs(t, actualErr, &actualNotFound, "expected NotFound error from sut")
-			require.Equal(t, expectedNotFound.Key, actualNotFound.Key, "NotFound keys should match")
-		} else if expectedErr != nil || actualErr != nil {
-			require.NoError(t, expectedErr, "model error should match sut error")
-			require.NoError(t, actualErr, "sut error should match model error")
-		} else {
-			// both succeeded, values should match
-			require.Equal(t, expected, actual,
-				"key %s: expected %q, got %q from %s",
-				key, expected, actual, stats.Source)
+		// model errors other than notfound are test failures
+		if expectedErr != nil && !errors.Is(expectedErr, &api.NotFound{}) {
+			require.Fail(t, "model error", "key %s: %v", key, expectedErr)
 		}
+
+		// if model says notfound, sut should too
+		if errors.Is(expectedErr, &api.NotFound{}) {
+			require.ErrorIs(t, actualErr, &api.NotFound{}, "key %s: model notfound but sut found", key)
+			verified++
+			continue
+		}
+
+		// model found value, sut should too
+		require.NoError(t, actualErr, "key %s", key)
+		require.Equal(t, expected, actual,
+			"key %s: expected %q, got %q from %s",
+			key, expected, actual, stats.Source)
 
 		if actualErr == nil {
 			h.stats.Incr(stats)
@@ -156,10 +157,13 @@ func (o GetOp) String() string {
 
 func (o GetOp) Run(t *testing.T, ctx context.Context) error {
 	val, stats, err := o.h.sut.Get(ctx, o.k)
+	
+	// handle unexpected errors early
 	if err != nil && !errors.Is(err, &api.NotFound{}) {
 		return fmt.Errorf("get: %v", err)
 	}
 	
+	// handle notfound case early
 	if errors.Is(err, &api.NotFound{}) {
 		_, _, modelErr := o.h.model.Get(ctx, o.k)
 		if !errors.Is(modelErr, &api.NotFound{}) {
@@ -169,7 +173,7 @@ func (o GetOp) Run(t *testing.T, ctx context.Context) error {
 		return nil
 	}
 
-	// compare with model
+	// success case - compare with model
 	modelVal, _, modelErr := o.h.model.Get(ctx, o.k)
 	if modelErr != nil {
 		return fmt.Errorf("model get: %v", modelErr)
