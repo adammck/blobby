@@ -2,8 +2,22 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
+
+type NotFound struct {
+	Key string
+}
+
+func (e *NotFound) Error() string {
+	return fmt.Sprintf("not found: %s", e.Key)
+}
+
+func (e *NotFound) Is(err error) bool {
+	_, ok := err.(*NotFound)
+	return ok
+}
 
 type GetStats struct {
 	Source         string
@@ -14,6 +28,12 @@ type GetStats struct {
 
 // TODO: Implement PutStats
 type PutStats struct {
+}
+
+// DeleteStats contains metadata about a delete operation.
+type DeleteStats struct {
+	Timestamp   time.Time
+	Destination string
 }
 
 type FlushStats struct {
@@ -105,4 +125,5 @@ type Blobby interface {
 	Get(ctx context.Context, key string) ([]byte, *GetStats, error)
 	Flush(ctx context.Context) (*FlushStats, error)
 	Compact(ctx context.Context, opts CompactionOptions) ([]*CompactionStats, error)
+	Delete(ctx context.Context, key string) (*DeleteStats, error)
 }

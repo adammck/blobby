@@ -119,6 +119,24 @@ func (b *Blobby) Put(ctx context.Context, key string, value []byte) (string, err
 	return b.mt.Put(ctx, key, value)
 }
 
+func (b *Blobby) Delete(ctx context.Context, key string) (*api.DeleteStats, error) {
+	rec := &types.Record{
+		Key:       key,
+		Document:  nil,
+		Tombstone: true,
+	}
+
+	dest, err := b.mt.PutRecord(ctx, rec)
+	if err != nil {
+		return nil, fmt.Errorf("memtable.PutRecord: %w", err)
+	}
+
+	return &api.DeleteStats{
+		Timestamp:   rec.Timestamp,
+		Destination: dest,
+	}, nil
+}
+
 // TODO: return the Record, or maybe the timestamp too, not just the value.
 func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.GetStats, err error) {
 	stats = &api.GetStats{}
@@ -128,8 +146,10 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 		return nil, stats, fmt.Errorf("memtable.Get: %w", err)
 	}
 	if rec != nil {
-		// TODO: Update Memtable.Get to return stats too.
 		stats.Source = src
+		if rec.Tombstone {
+			return nil, stats, &api.NotFound{Key: key}
+		}
 		return rec.Document, stats, nil
 	}
 
@@ -193,18 +213,21 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 		stats.RecordsScanned += scanned
 
 		if rec != nil {
+			stats.Source = meta.Filename()
+			if rec.Tombstone {
+				return nil, stats, &api.NotFound{Key: key}
+			}
 			// return as soon as we find the first record, but that's wrong!
 			// before returning, we need to look at the record timestamp, and
 			// check whether any of the remaining metas have a minTime newer
 			// than that. this is only possible after a weird compaction.
 			// TODO: fix this!
-			stats.Source = meta.Filename()
 			return rec.Document, stats, nil
 		}
 	}
 
 	// key not found
-	return nil, stats, nil
+	return nil, stats, &api.NotFound{Key: key}
 }
 
 // getIndex returns the index for the given sstable. If the index is not already

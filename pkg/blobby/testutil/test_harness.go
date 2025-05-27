@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -39,6 +40,10 @@ func (s *Harness) Put(key string, value []byte) Op {
 	return PutOp{h: s, k: key, v: value}
 }
 
+func (s *Harness) Delete(key string) Op {
+	return DeleteOp{h: s, k: key}
+}
+
 func (s *Harness) Flush() Op {
 	return FlushOp{h: s}
 }
@@ -52,17 +57,30 @@ func (h *Harness) Verify(ctx context.Context, t *testing.T) {
 	var verified int
 
 	for key := range h.keys {
-		expected, _, err := h.model.Get(ctx, key)
-		require.NoError(t, err)
+		expected, _, expectedErr := h.model.Get(ctx, key)
+		actual, stats, actualErr := h.sut.Get(ctx, key)
 
-		actual, stats, err := h.sut.Get(ctx, key)
-		require.NoError(t, err)
+		// model errors other than notfound are test failures
+		if expectedErr != nil && !errors.Is(expectedErr, &api.NotFound{}) {
+			require.Fail(t, "model error", "key %s: %v", key, expectedErr)
+		}
 
+		// if model says notfound, sut should too
+		if errors.Is(expectedErr, &api.NotFound{}) {
+			require.ErrorIs(t, actualErr, &api.NotFound{}, "key %s: model notfound but sut found", key)
+			verified++
+			continue
+		}
+
+		// model found value, sut should too
+		require.NoError(t, actualErr, "key %s", key)
 		require.Equal(t, expected, actual,
 			"key %s: expected %q, got %q from %s",
 			key, expected, actual, stats.Source)
 
-		h.stats.Incr(stats)
+		if actualErr == nil {
+			h.stats.Incr(stats)
+		}
 		verified++
 	}
 
@@ -138,33 +156,60 @@ func (o GetOp) String() string {
 }
 
 func (o GetOp) Run(t *testing.T, ctx context.Context) error {
-	expected, _, err := o.h.model.Get(ctx, o.k)
-	if err != nil {
-		return fmt.Errorf("fakeBlobby get: %v", err)
-	}
-
-	actual, stats, err := o.h.sut.Get(ctx, o.k)
-	if err != nil {
+	val, stats, err := o.h.sut.Get(ctx, o.k)
+	
+	// handle unexpected errors early
+	if err != nil && !errors.Is(err, &api.NotFound{}) {
 		return fmt.Errorf("get: %v", err)
 	}
-
-	o.h.stats.Incr(stats)
-
-	if expected == nil {
-		if actual != nil {
-			return fmt.Errorf("key %s: expected nil, got %q from %s",
-				o.k, actual, stats.Source)
+	
+	// handle notfound case early
+	if errors.Is(err, &api.NotFound{}) {
+		_, _, modelErr := o.h.model.Get(ctx, o.k)
+		if !errors.Is(modelErr, &api.NotFound{}) {
+			return fmt.Errorf("sut returned NotFound but model did not: sut=%v, model=%v", err, modelErr)
 		}
+		t.Logf("Get %s -> NotFound (expected)", o.k)
 		return nil
 	}
 
-	if string(actual) != string(expected) {
-		return fmt.Errorf("key %s: expected %q, got %q from %s",
-			o.k, expected, actual, stats.Source)
+	// success case - compare with model
+	modelVal, _, modelErr := o.h.model.Get(ctx, o.k)
+	if modelErr != nil {
+		return fmt.Errorf("model get: %v", modelErr)
 	}
 
-	t.Logf("Get %s=%q <- %s (scanned %d records in %d blobs)",
-		o.k, actual, stats.Source, stats.RecordsScanned, stats.BlobsFetched)
+	if !bytes.Equal(val, modelVal) {
+		return fmt.Errorf("value mismatch: sut=%q, model=%q", val, modelVal)
+	}
+
+	o.h.stats.Incr(stats)
+	t.Logf("Get %s=%q from %s", o.k, val, stats.Source)
+
+	return nil
+}
+
+type DeleteOp struct {
+	h *Harness
+	k string
+}
+
+func (o DeleteOp) String() string {
+	return fmt.Sprintf("delete %s", o.k)
+}
+
+func (o DeleteOp) Run(t *testing.T, ctx context.Context) error {
+	stats, err := o.h.sut.Delete(ctx, o.k)
+	if err != nil {
+		return fmt.Errorf("sut.Delete: %v", err)
+	}
+
+	_, err = o.h.model.Delete(ctx, o.k)
+	if err != nil {
+		return fmt.Errorf("model.Delete: %v", err)
+	}
+
+	t.Logf("Delete %s -> %s", o.k, stats.Destination)
 
 	return nil
 }

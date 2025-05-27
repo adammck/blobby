@@ -5,18 +5,23 @@ import (
 	"sync"
 
 	"github.com/adammck/blobby/pkg/api"
+	"github.com/jonboulle/clockwork"
 )
 
+var tombstone []byte = nil
+
 type FakeBlobby struct {
-	data map[string][]byte
-	mu   sync.RWMutex
+	data  map[string][]byte
+	mu    sync.RWMutex
+	clock clockwork.Clock
 }
 
 var _ api.Blobby = (*FakeBlobby)(nil)
 
 func NewFakeBlobby() *FakeBlobby {
 	return &FakeBlobby{
-		data: make(map[string][]byte),
+		data:  make(map[string][]byte),
+		clock: clockwork.NewRealClock(),
 	}
 }
 
@@ -25,8 +30,9 @@ func (m *FakeBlobby) Get(ctx context.Context, key string) ([]byte, *api.GetStats
 	defer m.mu.RUnlock()
 
 	val, exists := m.data[key]
-	if !exists {
-		return nil, &api.GetStats{}, nil
+	// key doesn't exist or key was deleted (tombstone)
+	if !exists || val == nil {
+		return nil, &api.GetStats{}, &api.NotFound{Key: key}
 	}
 	return val, &api.GetStats{}, nil
 }
@@ -37,6 +43,17 @@ func (m *FakeBlobby) Put(ctx context.Context, key string, value []byte) (string,
 
 	m.data[key] = value
 	return "model", nil
+}
+
+func (m *FakeBlobby) Delete(ctx context.Context, key string) (*api.DeleteStats, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.data[key] = tombstone
+	return &api.DeleteStats{
+		Timestamp:   m.clock.Now(),
+		Destination: "model",
+	}, nil
 }
 
 // No-op but returns valid stats structure

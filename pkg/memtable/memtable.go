@@ -98,17 +98,29 @@ func (mt *Memtable) getOneColl(ctx context.Context, db *mongo.Database, coll, ke
 }
 
 func (mt *Memtable) Put(ctx context.Context, key string, value []byte) (string, error) {
+	return mt.PutRecord(ctx, &types.Record{
+		Key:      key,
+		Document: value,
+	})
+}
+
+// PutRecord inserts a pre-constructed record. Use this for tombstones or when
+// you need precise control over the record fields. Use Put for normal writes
+// and Delete for deletions.
+func (mt *Memtable) PutRecord(ctx context.Context, rec *types.Record) (string, error) {
+	if !rec.Timestamp.IsZero() {
+		return "", fmt.Errorf("record timestamp must be unset, will be assigned automatically")
+	}
+
 	c, err := mt.activeCollection(ctx)
 	if err != nil {
 		return "", err
 	}
 
 	for {
-		_, err = c.InsertOne(ctx, &types.Record{
-			Key:       key,
-			Timestamp: mt.clock.Now(),
-			Document:  value,
-		})
+		rec.Timestamp = mt.clock.Now()
+
+		_, err = c.InsertOne(ctx, rec)
 		if err == nil {
 			break
 		}
