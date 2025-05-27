@@ -22,7 +22,7 @@ var (
 
 	pGet     = flag.Int("pget", 200, "probability of get")
 	pPut     = flag.Int("pput", 200, "probability of put")
-	pDelete  = flag.Int("pdelete", 50, "probability of delete")
+	pDelete  = flag.Int("pdelete", 20, "probability of delete")
 	pFlush   = flag.Int("pflush", 10, "probability of flush")
 	pCompact = flag.Int("pcompact", 1, "probability of compaction")
 

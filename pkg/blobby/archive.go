@@ -214,6 +214,7 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 		stats.RecordsScanned += scanned
 
 		if rec != nil {
+			stats.Source = meta.Filename()
 			// check if this is a tombstone
 			if rec.Tombstone {
 				return nil, stats, &api.NotFound{Key: key}
@@ -223,7 +224,6 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 			// check whether any of the remaining metas have a minTime newer
 			// than that. this is only possible after a weird compaction.
 			// TODO: fix this!
-			stats.Source = meta.Filename()
 			return rec.Document, stats, nil
 		}
 	}

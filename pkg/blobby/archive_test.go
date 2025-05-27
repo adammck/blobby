@@ -452,12 +452,14 @@ func TestDelete(t *testing.T) {
 	require.Equal(t, []byte("value3"), val)
 
 	// key2 should return NotFound
-	tb.getNotFound("key2")
+	val, stats, err := tb.b.Get(tb.ctx, "key2")
+	tb.requireNotFound(val, stats, err, "key2")
 
 	// delete non-existent key should work (idempotent)
 	c.Advance(15 * time.Millisecond)
 	tb.delete("nonexistent")
-	tb.getNotFound("nonexistent")
+	val, stats, err = tb.b.Get(tb.ctx, "nonexistent")
+	tb.requireNotFound(val, stats, err, "nonexistent")
 
 	// put after delete should work
 	c.Advance(15 * time.Millisecond)
@@ -468,7 +470,8 @@ func TestDelete(t *testing.T) {
 	// delete again
 	c.Advance(15 * time.Millisecond)
 	tb.delete("key2")
-	tb.getNotFound("key2")
+	val, stats, err = tb.b.Get(tb.ctx, "key2")
+	tb.requireNotFound(val, stats, err, "key2")
 }
 
 func TestDeleteWithFlush(t *testing.T) {
@@ -488,16 +491,18 @@ func TestDeleteWithFlush(t *testing.T) {
 	tb.put("key1", []byte("value1"))
 	c.Advance(15 * time.Millisecond)
 	tb.delete("key1")
-	tb.getNotFound("key1")
+	val, stats, err := tb.b.Get(tb.ctx, "key1")
+	tb.requireNotFound(val, stats, err, "key1")
 
 	// flush should preserve tombstone
 	tb.flush()
-	tb.getNotFound("key1")
+	val, stats, err = tb.b.Get(tb.ctx, "key1")
+	tb.requireNotFound(val, stats, err, "key1")
 
 	// put new value with same key
 	c.Advance(15 * time.Millisecond)
 	tb.put("key1", []byte("new_value"))
-	val, _ := tb.get("key1")
+	val, _ = tb.get("key1")
 	require.Equal(t, []byte("new_value"), val)
 
 	// flush again
@@ -534,19 +539,21 @@ func TestDeleteWithCompaction(t *testing.T) {
 	tb.flush()
 
 	// verify state before compaction
-	tb.getNotFound("key1")
-	val, _ := tb.get("key2")
+	val, stats, err := tb.b.Get(tb.ctx, "key1")
+	tb.requireNotFound(val, stats, err, "key1")
+	val, _ = tb.get("key2")
 	require.Equal(t, []byte("value2"), val)
 	val, _ = tb.get("key3")
 	require.Equal(t, []byte("value3"), val)
 
 	// compact all sstables
 	c.Advance(1 * time.Hour)
-	_, err := b.Compact(ctx, api.CompactionOptions{})
+	_, err = b.Compact(ctx, api.CompactionOptions{})
 	require.NoError(t, err)
 
 	// verify tombstone is preserved after compaction
-	tb.getNotFound("key1")
+	val, stats, err = tb.b.Get(tb.ctx, "key1")
+	tb.requireNotFound(val, stats, err, "key1")
 	val, _ = tb.get("key2")
 	require.Equal(t, []byte("value2"), val)
 	val, _ = tb.get("key3")
@@ -580,6 +587,34 @@ func TestDeleteReturnsStatsWithSource(t *testing.T) {
 	require.Equal(t, memtableName, stats.Source, "stats should include the memtable where tombstone was found")
 }
 
+func TestDeleteReturnsStatsWithSourceFromSSTable(t *testing.T) {
+	ts := time.Now().UTC().Truncate(time.Second)
+	c := clockwork.NewFakeClockAt(ts)
+	ctx, _, b := setup(t, c)
+
+	tb := &testBlobby{
+		ctx: ctx,
+		c:   c,
+		t:   t,
+		b:   b,
+	}
+
+	// put and delete a key, then flush to create sstable
+	c.Advance(15 * time.Millisecond)
+	tb.put("test-key", []byte("test-value"))
+	c.Advance(15 * time.Millisecond)
+	tb.delete("test-key")
+	flushStats := tb.flush()
+
+	// get should return notfound with stats showing the sstable source
+	_, stats, err := b.Get(ctx, "test-key")
+	require.Error(t, err)
+	var notFound *api.NotFound
+	require.ErrorAs(t, err, &notFound)
+	require.Equal(t, "test-key", notFound.Key)
+	require.Equal(t, flushStats.Meta.Filename(), stats.Source, "stats should include the sstable where tombstone was found")
+}
+
 type testBlobby struct {
 	ctx context.Context
 	c   *clockwork.FakeClock
@@ -599,22 +634,23 @@ func (ta *testBlobby) get(key string) ([]byte, *api.GetStats) {
 	return val, stats
 }
 
-func (ta *testBlobby) delete(key string) {
-	_, err := ta.b.Delete(ta.ctx, key)
+func (ta *testBlobby) delete(key string) *api.DeleteStats {
+	stats, err := ta.b.Delete(ta.ctx, key)
 	require.NoError(ta.t, err)
+	return stats
 }
 
-func (ta *testBlobby) getNotFound(key string) {
-	_, _, err := ta.b.Get(ta.ctx, key)
+func (ta *testBlobby) requireNotFound(val []byte, stats *api.GetStats, err error, expectedKey string) {
 	require.Error(ta.t, err)
 	var notFound *api.NotFound
 	require.ErrorAs(ta.t, err, &notFound)
-	require.Equal(ta.t, key, notFound.Key)
+	require.Equal(ta.t, expectedKey, notFound.Key)
 }
 
-func (ta *testBlobby) flush() {
-	_, err := ta.b.Flush(ta.ctx)
+func (ta *testBlobby) flush() *api.FlushStats {
+	stats, err := ta.b.Flush(ta.ctx)
 	require.NoError(ta.t, err)
+	return stats
 }
 
 type instant struct {
