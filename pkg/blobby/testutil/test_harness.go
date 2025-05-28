@@ -280,13 +280,13 @@ func (o RangeScanOp) String() string {
 }
 
 func (o RangeScanOp) Run(t *testing.T, ctx context.Context) error {
-	iter, stats, err := o.h.sut.RangeScan(ctx, o.start, o.end)
+	iter, _, err := o.h.sut.RangeScan(ctx, o.start, o.end)
 	if err != nil {
 		return fmt.Errorf("sut.RangeScan: %w", err)
 	}
 	defer iter.Close()
 
-	modelIter, modelStats, err := o.h.model.RangeScan(ctx, o.start, o.end)
+	modelIter, _, err := o.h.model.RangeScan(ctx, o.start, o.end)
 	if err != nil {
 		return fmt.Errorf("model.RangeScan: %w", err)
 	}
@@ -329,8 +329,7 @@ func (o RangeScanOp) Run(t *testing.T, ctx context.Context) error {
 		return fmt.Errorf("model iterator error: %w", modelIter.Err())
 	}
 
-	t.Logf("RangeScan [%q, %q) -> %d keys (sut: %d returned, model: %d returned)",
-		o.start, o.end, count, stats.RecordsReturned, modelStats.RecordsReturned)
+	t.Logf("RangeScan [%q, %q) -> %d keys", o.start, o.end, count)
 
 	return nil
 }
