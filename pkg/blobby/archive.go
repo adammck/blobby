@@ -315,7 +315,7 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 		return nil, stats, fmt.Errorf("invalid range: start=%q > end=%q", start, end)
 	}
 
-	var iterators []recordIterator
+	var iterators []api.Iterator
 	var sources []string
 
 	// collect memtable iterators (newest first)
@@ -333,7 +333,7 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 			}
 			return nil, stats, fmt.Errorf("memtable.Scan(%s): %w", name, err)
 		}
-		iterators = append(iterators, &apiIteratorAdapter{iter})
+		iterators = append(iterators, iter)
 		sources = append(sources, "memtable:"+name)
 	}
 
@@ -358,7 +358,7 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 		}
 
 		iter := sstable.NewRangeIterator(reader, start, end)
-		iterators = append(iterators, &apiIteratorAdapter{iter})
+		iterators = append(iterators, iter)
 		sources = append(sources, "sstable:"+meta.Filename())
 	}
 
