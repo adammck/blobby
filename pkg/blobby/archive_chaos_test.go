@@ -23,6 +23,7 @@ var (
 	pGet     = flag.Int("pget", 200, "probability of get")
 	pPut     = flag.Int("pput", 200, "probability of put")
 	pDelete  = flag.Int("pdelete", 20, "probability of delete")
+	pScan    = flag.Int("pscan", 30, "probability of range scan")
 	pFlush   = flag.Int("pflush", 10, "probability of flush")
 	pCompact = flag.Int("pcompact", 1, "probability of compaction")
 
@@ -48,6 +49,7 @@ type chaosTestConfig struct {
 	pGet      int
 	pPut      int
 	pDelete   int
+	pScan     int
 	pFlush    int
 	pCompact  int
 	pHot      int
@@ -66,6 +68,7 @@ func configFromFlags() chaosTestConfig {
 		pGet:      *pGet,
 		pPut:      *pPut,
 		pDelete:   *pDelete,
+		pScan:     *pScan,
 		pFlush:    *pFlush,
 		pCompact:  *pCompact,
 		pHot:      *pHot,
@@ -99,7 +102,7 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 	}
 
 	t.Logf("Spamming %d random ops....", cfg.numOps)
-	totalOps := cfg.pGet + cfg.pPut + cfg.pDelete + cfg.pFlush + cfg.pCompact
+	totalOps := cfg.pGet + cfg.pPut + cfg.pDelete + cfg.pScan + cfg.pFlush + cfg.pCompact
 	for i := range cfg.numOps {
 		var op testutil.Op
 		p := rnd.Intn(totalOps)
@@ -116,7 +119,11 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 		case p < cfg.pGet+cfg.pPut+cfg.pDelete:
 			op = th.Delete(selectKey(cfg, rnd))
 
-		case p < cfg.pGet+cfg.pPut+cfg.pDelete+cfg.pFlush:
+		case p < cfg.pGet+cfg.pPut+cfg.pDelete+cfg.pScan:
+			start, end := selectRange(cfg, rnd)
+			op = th.RangeScan(start, end)
+
+		case p < cfg.pGet+cfg.pPut+cfg.pDelete+cfg.pScan+cfg.pFlush:
 			op = th.Flush()
 
 		default:
@@ -145,6 +152,45 @@ func selectKey(cfg chaosTestConfig, rng *rand.Rand) string {
 	default:
 		return fmt.Sprintf("key-%04d", rng.Intn(cfg.nCold)+cfg.nHot+cfg.nWarm)
 	}
+}
+
+// selectRange generates a random range for range scans
+func selectRange(cfg chaosTestConfig, rng *rand.Rand) (string, string) {
+	// generate ranges of different sizes for variety
+	rangeType := rng.Intn(100)
+
+	switch {
+	case rangeType < 30: // 30% - small range (1-5 keys)
+		start := selectKey(cfg, rng)
+		startNum := extractKeyNum(start)
+		endNum := startNum + rng.Intn(5) + 1
+		end := fmt.Sprintf("key-%04d", endNum)
+		return start, end
+
+	case rangeType < 60: // 30% - medium range (5-20 keys)
+		start := selectKey(cfg, rng)
+		startNum := extractKeyNum(start)
+		endNum := startNum + rng.Intn(20) + 5
+		end := fmt.Sprintf("key-%04d", endNum)
+		return start, end
+
+	case rangeType < 85: // 25% - large range (hot+warm keys)
+		return "key-0000", fmt.Sprintf("key-%04d", cfg.nHot+cfg.nWarm)
+
+	case rangeType < 95: // 10% - prefix scan simulation
+		prefix := fmt.Sprintf("key-%01d", rng.Intn(10))
+		return prefix + "000", prefix + "999"
+
+	default: // 5% - full scan
+		return "", ""
+	}
+}
+
+// extractKeyNum extracts the numeric part from a key like "key-0042"
+func extractKeyNum(key string) int {
+	var num int
+	fmt.Sscanf(key, "key-%04d", &num)
+	return num
 }
 
 // getRand returns a random number generator seeded with the given seed, unless
