@@ -370,6 +370,14 @@ func (it *memtableIterator) Close() error {
 	return it.cursor.Close(it.ctx)
 }
 
+// CurrentTimestamp returns the timestamp of the current record
+func (it *memtableIterator) CurrentTimestamp() time.Time {
+	if it.cur == nil {
+		return time.Time{}
+	}
+	return it.cur.Timestamp
+}
+
 // Scan returns an iterator for all records in the memtable within the key range
 func (mt *Memtable) Scan(ctx context.Context, collName, start, end string) (api.Iterator, error) {
 	db, err := mt.GetMongo(ctx)

@@ -15,6 +15,11 @@ type recordIterator interface {
 	Close() error
 }
 
+// timestampProvider is an interface for iterators that can provide the current record's timestamp
+type timestampProvider interface {
+	CurrentTimestamp() time.Time
+}
+
 // apiIteratorAdapter adapts api.Iterator to recordIterator by reconstructing Record objects
 type apiIteratorAdapter struct {
 	iter api.Iterator
@@ -28,13 +33,19 @@ func (a *apiIteratorAdapter) Next(ctx context.Context) (*types.Record, error) {
 		return nil, nil // EOF
 	}
 
-	// reconstruct Record from api.Iterator interface
-	// note: we lose timestamp info, which means ordering won't be perfect
-	// but this is acceptable for range scans where we handle duplicates
+	// extract real timestamp from underlying iterator if possible
+	var timestamp time.Time
+	if provider, ok := a.iter.(timestampProvider); ok {
+		timestamp = provider.CurrentTimestamp()
+	} else {
+		// fallback to current time if we can't extract the real timestamp
+		timestamp = time.Now()
+	}
+
 	return &types.Record{
 		Key:       a.iter.Key(),
 		Document:  a.iter.Value(),
-		Timestamp: time.Now(),               // placeholder timestamp
+		Timestamp: timestamp,
 		Tombstone: len(a.iter.Value()) == 0, // simple heuristic
 	}, nil
 }

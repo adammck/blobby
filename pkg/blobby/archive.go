@@ -364,7 +364,44 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 
 	// create compound iterator
 	compound := newCompoundIterator(ctx, iterators, sources)
-	return compound, stats, nil
+
+	// wrap in counting iterator to track RecordsReturned
+	counting := &countingIterator{
+		inner: compound,
+		stats: stats,
+	}
+
+	return counting, stats, nil
+}
+
+// countingIterator wraps another iterator and tracks the number of records returned
+type countingIterator struct {
+	inner api.Iterator
+	stats *api.ScanStats
+}
+
+func (c *countingIterator) Next(ctx context.Context) bool {
+	hasNext := c.inner.Next(ctx)
+	if hasNext {
+		c.stats.RecordsReturned++
+	}
+	return hasNext
+}
+
+func (c *countingIterator) Key() string {
+	return c.inner.Key()
+}
+
+func (c *countingIterator) Value() []byte {
+	return c.inner.Value()
+}
+
+func (c *countingIterator) Err() error {
+	return c.inner.Err()
+}
+
+func (c *countingIterator) Close() error {
+	return c.inner.Close()
 }
 
 func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {

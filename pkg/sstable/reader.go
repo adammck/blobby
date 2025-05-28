@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/types"
@@ -106,6 +107,14 @@ func (it *rangeIterator) Value() []byte {
 		return nil
 	}
 	return it.current.Document
+}
+
+// CurrentTimestamp returns the timestamp of the current record
+func (it *rangeIterator) CurrentTimestamp() time.Time {
+	if it.current == nil {
+		return time.Time{}
+	}
+	return it.current.Timestamp
 }
 
 func (it *rangeIterator) Err() error {
