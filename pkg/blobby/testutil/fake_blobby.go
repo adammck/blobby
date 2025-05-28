@@ -56,6 +56,40 @@ func (m *FakeBlobby) Delete(ctx context.Context, key string) (*api.DeleteStats, 
 	}, nil
 }
 
+func (m *FakeBlobby) RangeScan(ctx context.Context, start, end string) (api.Iterator, *api.ScanStats, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var keys []string
+	for key := range m.data {
+		if m.data[key] == nil { // skip tombstones
+			continue
+		}
+		if start != "" && key < start {
+			continue
+		}
+		if end != "" && key >= end {
+			continue
+		}
+		keys = append(keys, key)
+	}
+
+	// sort keys
+	for i := 0; i < len(keys)-1; i++ {
+		for j := i + 1; j < len(keys); j++ {
+			if keys[i] > keys[j] {
+				keys[i], keys[j] = keys[j], keys[i]
+			}
+		}
+	}
+
+	return &fakeIterator{
+		data: m.data,
+		keys: keys,
+		pos:  -1,
+	}, &api.ScanStats{RecordsReturned: len(keys)}, nil
+}
+
 // No-op but returns valid stats structure
 func (m *FakeBlobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 	return &api.FlushStats{
@@ -77,5 +111,43 @@ func (m *FakeBlobby) Init(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.data = make(map[string][]byte)
+	return nil
+}
+
+type fakeIterator struct {
+	data map[string][]byte
+	keys []string
+	pos  int
+	err  error
+}
+
+func (it *fakeIterator) Next(ctx context.Context) bool {
+	if it.err != nil || it.pos >= len(it.keys)-1 {
+		return false
+	}
+	it.pos++
+	return true
+}
+
+func (it *fakeIterator) Key() string {
+	if it.pos < 0 || it.pos >= len(it.keys) {
+		return ""
+	}
+	return it.keys[it.pos]
+}
+
+func (it *fakeIterator) Value() []byte {
+	if it.pos < 0 || it.pos >= len(it.keys) {
+		return nil
+	}
+	key := it.keys[it.pos]
+	return it.data[key]
+}
+
+func (it *fakeIterator) Err() error {
+	return it.err
+}
+
+func (it *fakeIterator) Close() error {
 	return nil
 }

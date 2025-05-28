@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
 	"go.mongodb.org/mongo-driver/bson"
@@ -317,4 +318,120 @@ func (mt *Memtable) Drop(ctx context.Context, name string) error {
 	}
 
 	return nil
+}
+
+// memtableIterator implements api.Iterator for a single memtable
+type memtableIterator struct {
+	cursor *mongo.Cursor
+	ctx    context.Context
+	err    error
+	cur    *types.Record
+}
+
+func (it *memtableIterator) Next(ctx context.Context) bool {
+	if it.err != nil {
+		return false
+	}
+
+	if !it.cursor.Next(ctx) {
+		it.err = it.cursor.Err()
+		return false
+	}
+
+	var rec types.Record
+	if err := it.cursor.Decode(&rec); err != nil {
+		it.err = err
+		return false
+	}
+
+	it.cur = &rec
+	return true
+}
+
+func (it *memtableIterator) Key() string {
+	if it.cur == nil {
+		return ""
+	}
+	return it.cur.Key
+}
+
+func (it *memtableIterator) Value() []byte {
+	if it.cur == nil {
+		return nil
+	}
+	return it.cur.Document
+}
+
+func (it *memtableIterator) Err() error {
+	return it.err
+}
+
+func (it *memtableIterator) Close() error {
+	return it.cursor.Close(it.ctx)
+}
+
+// Scan returns an iterator for all records in the memtable within the key range
+func (mt *Memtable) Scan(ctx context.Context, collName, start, end string) (api.Iterator, error) {
+	db, err := mt.GetMongo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("GetMongo: %w", err)
+	}
+
+	// build range query
+	filter := bson.M{}
+	if start != "" || end != "" {
+		keyFilter := bson.M{}
+		if start != "" {
+			keyFilter["$gte"] = start
+		}
+		if end != "" {
+			keyFilter["$lt"] = end
+		}
+		filter["key"] = keyFilter
+	}
+
+	// query sorted by key then by timestamp (newest first within each key)
+	cursor, err := db.Collection(collName).Find(
+		ctx,
+		filter,
+		options.Find().SetSort(bson.D{
+			{Key: "key", Value: 1},
+			{Key: "ts", Value: -1},
+		}))
+	if err != nil {
+		return nil, fmt.Errorf("Find: %w", err)
+	}
+
+	return &memtableIterator{
+		cursor: cursor,
+		ctx:    ctx,
+	}, nil
+}
+
+// ListMemtables returns all memtable names in creation order (newest first)
+func (mt *Memtable) ListMemtables(ctx context.Context) ([]string, error) {
+	db, err := mt.GetMongo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("GetMongo: %w", err)
+	}
+
+	cur, err := db.Collection(memtablesCollection).Find(
+		ctx,
+		bson.M{},
+		options.Find().SetSort(bson.D{{Key: "created", Value: -1}}))
+	if err != nil {
+		return nil, fmt.Errorf("db.Collection: %w", err)
+	}
+	defer cur.Close(ctx)
+
+	var memtables []memtableInfo
+	if err := cur.All(ctx, &memtables); err != nil {
+		return nil, fmt.Errorf("cur.All: %w", err)
+	}
+
+	names := make([]string, len(memtables))
+	for i, mt := range memtables {
+		names[i] = mt.ID
+	}
+	return names, nil
 }
