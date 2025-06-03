@@ -8,13 +8,6 @@ import (
 	"github.com/adammck/blobby/pkg/types"
 )
 
-type mockCursor interface {
-	Next(ctx context.Context) bool
-	Err() error
-	Decode(v interface{}) error
-	Close(ctx context.Context) error
-}
-
 type simpleMockCursor struct {
 	records []types.Record
 	pos     int
