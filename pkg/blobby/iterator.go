@@ -21,6 +21,8 @@ type compoundIterator struct {
 	lastEmittedKey string
 	err            error
 	exhausted      bool
+	allIterators   []api.Iterator // track all iterators for cleanup
+	closed         bool           // track if Close() has been called
 }
 
 type iteratorState struct {
@@ -61,11 +63,12 @@ func (h *iteratorHeap) Pop() interface{} {
 
 func newCompoundIterator(ctx context.Context, iterators []api.Iterator, sources []string) *compoundIterator {
 	ci := &compoundIterator{
-		ctx:  ctx,
-		heap: &iteratorHeap{},
+		ctx:          ctx,
+		heap:         &iteratorHeap{},
+		allIterators: append([]api.Iterator(nil), iterators...), // copy slice
 	}
 
-	// prime all iterators and add to heap
+	// prime all iterators - add valid ones to heap
 	for i, iter := range iterators {
 		state := &iteratorState{
 			iter:   iter,
@@ -77,7 +80,6 @@ func newCompoundIterator(ctx context.Context, iterators []api.Iterator, sources 
 		}
 	}
 
-	heap.Init(ci.heap)
 	return ci
 }
 
@@ -99,7 +101,7 @@ func advanceIteratorState(ctx context.Context, state *iteratorState) bool {
 }
 
 func (ci *compoundIterator) Next(ctx context.Context) bool {
-	if ci.exhausted || ci.err != nil {
+	if ci.exhausted || ci.err != nil || ci.closed {
 		return false
 	}
 
@@ -120,38 +122,50 @@ func (ci *compoundIterator) Next(ctx context.Context) bool {
 		// get next record from heap
 		state := heap.Pop(ci.heap).(*iteratorState)
 
-		// advance that iterator
-		if advanceIteratorState(ctx, state) {
-			heap.Push(ci.heap, state)
-		}
-
 		// skip if we've seen this key (older version)
 		if state.key == ci.lastEmittedKey {
+			// advance that iterator and push back if more data
+			if advanceIteratorState(ctx, state) {
+				heap.Push(ci.heap, state)
+			}
 			continue
 		}
 
 		// skip if tombstone
 		if len(state.value) == 0 {
 			ci.lastEmittedKey = state.key
+			// advance that iterator and push back if more data
+			if advanceIteratorState(ctx, state) {
+				heap.Push(ci.heap, state)
+			}
 			continue
 		}
 
-		// found a live record
-		ci.current = state
+		// found a live record - save a copy before advancing the iterator
+		ci.current = &iteratorState{
+			key:   state.key,
+			value: append([]byte(nil), state.value...), // copy value slice
+		}
 		ci.lastEmittedKey = state.key
+
+		// advance that iterator and push back if more data
+		if advanceIteratorState(ctx, state) {
+			heap.Push(ci.heap, state)
+		}
+
 		return true
 	}
 }
 
 func (ci *compoundIterator) Key() string {
-	if ci.current == nil {
+	if ci.current == nil || ci.closed {
 		return ""
 	}
 	return ci.current.key
 }
 
 func (ci *compoundIterator) Value() []byte {
-	if ci.current == nil {
+	if ci.current == nil || ci.closed {
 		return nil
 	}
 	return ci.current.value
@@ -162,10 +176,14 @@ func (ci *compoundIterator) Err() error {
 }
 
 func (ci *compoundIterator) Close() error {
+	if ci.closed {
+		return nil // already closed
+	}
+	ci.closed = true
+
 	// close all underlying iterators
-	for ci.heap.Len() > 0 {
-		state := heap.Pop(ci.heap).(*iteratorState)
-		if err := state.iter.Close(); err != nil {
+	for _, iter := range ci.allIterators {
+		if err := iter.Close(); err != nil {
 			return err
 		}
 	}
