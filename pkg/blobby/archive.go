@@ -306,6 +306,104 @@ func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (
 	return rec, scanned, nil
 }
 
+// RangeScan returns an iterator for all keys in the range [start, end)
+func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator, *api.ScanStats, error) {
+	stats := &api.ScanStats{}
+
+	// validate range
+	if start > end && end != "" {
+		return nil, stats, fmt.Errorf("invalid range: start=%q > end=%q", start, end)
+	}
+
+	var iterators []api.Iterator
+	var sources []string
+
+	// collect memtable iterators (newest first)
+	memtables, err := b.mt.ListMemtables(ctx)
+	if err != nil {
+		return nil, stats, fmt.Errorf("ListMemtables: %w", err)
+	}
+
+	for _, name := range memtables {
+		iter, err := b.mt.Scan(ctx, name, start, end)
+		if err != nil {
+			// cleanup already created iterators
+			for _, it := range iterators {
+				it.Close()
+			}
+			return nil, stats, fmt.Errorf("memtable.Scan(%s): %w", name, err)
+		}
+		iterators = append(iterators, iter)
+		sources = append(sources, "memtable:"+name)
+	}
+
+	// collect sstable iterators (by metadata ordering)
+	metas, err := b.md.GetAllMetas(ctx)
+	if err != nil {
+		// cleanup memtable iterators
+		for _, it := range iterators {
+			it.Close()
+		}
+		return nil, stats, fmt.Errorf("metadata.GetAllMetas: %w", err)
+	}
+
+	for _, meta := range metas {
+		reader, err := b.sstm.GetFull(ctx, meta.Filename())
+		if err != nil {
+			// cleanup already created iterators
+			for _, it := range iterators {
+				it.Close()
+			}
+			return nil, stats, fmt.Errorf("sstm.GetFull(%s): %w", meta.Filename(), err)
+		}
+
+		iter := sstable.NewRangeIterator(reader, start, end)
+		iterators = append(iterators, iter)
+		sources = append(sources, "sstable:"+meta.Filename())
+	}
+
+	// create compound iterator
+	compound := newCompoundIterator(ctx, iterators, sources)
+
+	// wrap in counting iterator to track RecordsReturned
+	counting := &countingIterator{
+		inner: compound,
+		stats: stats,
+	}
+
+	return counting, stats, nil
+}
+
+// countingIterator wraps another iterator and tracks the number of records returned
+type countingIterator struct {
+	inner api.Iterator
+	stats *api.ScanStats
+}
+
+func (c *countingIterator) Next(ctx context.Context) bool {
+	hasNext := c.inner.Next(ctx)
+	if hasNext {
+		c.stats.RecordsReturned++
+	}
+	return hasNext
+}
+
+func (c *countingIterator) Key() string {
+	return c.inner.Key()
+}
+
+func (c *countingIterator) Value() []byte {
+	return c.inner.Value()
+}
+
+func (c *countingIterator) Err() error {
+	return c.inner.Err()
+}
+
+func (c *countingIterator) Close() error {
+	return c.inner.Close()
+}
+
 func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 	stats := &api.FlushStats{}
 
