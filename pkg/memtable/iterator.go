@@ -5,12 +5,18 @@ import (
 	"time"
 
 	"github.com/adammck/blobby/pkg/types"
-	"go.mongodb.org/mongo-driver/mongo"
 )
+
+type cursor interface {
+	Next(ctx context.Context) bool
+	Err() error
+	Decode(v interface{}) error
+	Close(ctx context.Context) error
+}
 
 // memtableIterator implements api.Iterator for a single memtable
 type memtableIterator struct {
-	cursor *mongo.Cursor
+	cursor cursor
 	ctx    context.Context
 	err    error
 	cur    *types.Record
