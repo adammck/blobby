@@ -14,6 +14,7 @@ import (
 	mfilterstore "github.com/adammck/blobby/pkg/impl/filterstore/mongo"
 	mindexstore "github.com/adammck/blobby/pkg/impl/indexstore/mongo"
 	"github.com/adammck/blobby/pkg/index"
+	"github.com/adammck/blobby/pkg/iterator"
 	"github.com/adammck/blobby/pkg/memtable"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
@@ -363,7 +364,7 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 	}
 
 	// create compound iterator
-	compound := newCompoundIterator(ctx, iterators, sources)
+	compound := iterator.NewCompound(ctx, iterators, sources)
 
 	// wrap in counting iterator to track RecordsReturned
 	counting := &countingIterator{
