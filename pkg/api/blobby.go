@@ -54,6 +54,9 @@ type Iterator interface {
 	// Value returns the current value. Only valid after Next() returns true.
 	Value() []byte
 
+	// Timestamp returns the timestamp of the current record.
+	Timestamp() time.Time
+
 	// Err returns any error encountered during iteration.
 	Err() error
 

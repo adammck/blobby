@@ -397,6 +397,10 @@ func (c *countingIterator) Value() []byte {
 	return c.inner.Value()
 }
 
+func (c *countingIterator) Timestamp() time.Time {
+	return c.inner.Timestamp()
+}
+
 func (c *countingIterator) Err() error {
 	return c.inner.Err()
 }

@@ -45,7 +45,7 @@ func (m *mockIterator) Value() []byte {
 	return m.records[m.pos-1].value
 }
 
-func (m *mockIterator) CurrentTimestamp() time.Time {
+func (m *mockIterator) Timestamp() time.Time {
 	if m.pos <= 0 || m.pos > len(m.records) {
 		return time.Time{}
 	}

@@ -23,7 +23,7 @@ func TestMemtableIterator_EmptyResults(t *testing.T) {
 	require.NoError(t, it.Err())
 	require.Equal(t, "", it.Key())
 	require.Nil(t, it.Value())
-	require.True(t, it.CurrentTimestamp().IsZero())
+	require.True(t, it.Timestamp().IsZero())
 
 	err := it.Close()
 	require.NoError(t, err)
@@ -45,9 +45,9 @@ func TestMemtableIterator_SingleRecord(t *testing.T) {
 	require.Equal(t, []byte("test-doc"), it.Value())
 
 	if useMockCursors() {
-		require.Equal(t, now, it.CurrentTimestamp())
+		require.Equal(t, now, it.Timestamp())
 	} else {
-		require.False(t, it.CurrentTimestamp().IsZero())
+		require.False(t, it.Timestamp().IsZero())
 	}
 
 	require.False(t, it.Next(ctx))
@@ -70,7 +70,7 @@ func TestMemtableIterator_MultipleRecords(t *testing.T) {
 	for it.Next(ctx) {
 		require.NoError(t, it.Err())
 		seen[it.Key()] = it.Value()
-		require.False(t, it.CurrentTimestamp().IsZero())
+		require.False(t, it.Timestamp().IsZero())
 		count++
 	}
 
@@ -89,7 +89,7 @@ func TestMemtableIterator_AccessorsBeforeNext(t *testing.T) {
 
 	require.Equal(t, "", it.Key())
 	require.Nil(t, it.Value())
-	require.True(t, it.CurrentTimestamp().IsZero())
+	require.True(t, it.Timestamp().IsZero())
 	require.NoError(t, it.Err())
 
 	err := it.Close()
@@ -141,7 +141,7 @@ func TestMemtableIterator_WithTombstones(t *testing.T) {
 
 		seen[key] = value
 		tombstones[key] = (len(value) == 0)
-		require.False(t, it.CurrentTimestamp().IsZero())
+		require.False(t, it.Timestamp().IsZero())
 		count++
 	}
 

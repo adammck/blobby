@@ -69,8 +69,8 @@ func (it *rangeIterator) Value() []byte {
 	return it.current.Document
 }
 
-// CurrentTimestamp returns the timestamp of the current record
-func (it *rangeIterator) CurrentTimestamp() time.Time {
+// Timestamp returns the timestamp of the current record
+func (it *rangeIterator) Timestamp() time.Time {
 	if it.current == nil {
 		return time.Time{}
 	}

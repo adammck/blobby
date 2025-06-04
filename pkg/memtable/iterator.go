@@ -64,8 +64,8 @@ func (it *memtableIterator) Close() error {
 	return it.cursor.Close(it.ctx)
 }
 
-// CurrentTimestamp returns the timestamp of the current record
-func (it *memtableIterator) CurrentTimestamp() time.Time {
+// Timestamp returns the timestamp of the current record
+func (it *memtableIterator) Timestamp() time.Time {
 	if it.cur == nil {
 		return time.Time{}
 	}

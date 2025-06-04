@@ -26,7 +26,7 @@ func TestRangeIterator_EmptySSTable(t *testing.T) {
 	require.Nil(t, iter.Value())
 
 	timestampProvider := iter.(*rangeIterator)
-	require.True(t, timestampProvider.CurrentTimestamp().IsZero())
+	require.True(t, timestampProvider.Timestamp().IsZero())
 }
 
 func TestRangeIterator_SingleRecord(t *testing.T) {
@@ -46,9 +46,9 @@ func TestRangeIterator_SingleRecord(t *testing.T) {
 	require.Equal(t, "test-key", iter.Key())
 	require.Equal(t, []byte("test-doc"), iter.Value())
 
-	// cast to access CurrentTimestamp method
+	// cast to access Timestamp method
 	timestampProvider := iter.(*rangeIterator)
-	require.Equal(t, now, timestampProvider.CurrentTimestamp())
+	require.Equal(t, now, timestampProvider.Timestamp())
 
 	require.False(t, iter.Next(ctx))
 	require.NoError(t, iter.Err())
@@ -73,19 +73,19 @@ func TestRangeIterator_MultipleRecords(t *testing.T) {
 	require.Equal(t, "apple", iter.Key())
 	require.Equal(t, []byte("fruit1"), iter.Value())
 	timestampProvider := iter.(*rangeIterator)
-	require.Equal(t, now, timestampProvider.CurrentTimestamp())
+	require.Equal(t, now, timestampProvider.Timestamp())
 
 	require.True(t, iter.Next(ctx))
 	require.Equal(t, "banana", iter.Key())
 	require.Equal(t, []byte("fruit2"), iter.Value())
 	timestampProvider = iter.(*rangeIterator)
-	require.Equal(t, now.Add(1*time.Second), timestampProvider.CurrentTimestamp())
+	require.Equal(t, now.Add(1*time.Second), timestampProvider.Timestamp())
 
 	require.True(t, iter.Next(ctx))
 	require.Equal(t, "cherry", iter.Key())
 	require.Equal(t, []byte("fruit3"), iter.Value())
 	timestampProvider = iter.(*rangeIterator)
-	require.Equal(t, now.Add(2*time.Second), timestampProvider.CurrentTimestamp())
+	require.Equal(t, now.Add(2*time.Second), timestampProvider.Timestamp())
 
 	require.False(t, iter.Next(ctx))
 	require.NoError(t, iter.Err())
@@ -269,7 +269,7 @@ func TestRangeIterator_StateAfterExhausted(t *testing.T) {
 	require.Equal(t, "only", iter.Key())
 	require.Equal(t, []byte("record"), iter.Value())
 	timestampProvider := iter.(*rangeIterator)
-	require.Equal(t, now, timestampProvider.CurrentTimestamp())
+	require.Equal(t, now, timestampProvider.Timestamp())
 }
 
 func TestRangeIterator_CloseCleanup(t *testing.T) {
