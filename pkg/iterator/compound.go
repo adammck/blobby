@@ -8,10 +8,6 @@ import (
 	"github.com/adammck/blobby/pkg/api"
 )
 
-type TimestampProvider interface {
-	CurrentTimestamp() time.Time
-}
-
 type Compound struct {
 	ctx            context.Context
 	heap           *iteratorHeap
@@ -86,10 +82,8 @@ func advanceIteratorState(ctx context.Context, state *iteratorState) bool {
 
 	state.key = state.iter.Key()
 	state.value = state.iter.Value()
+	state.timestamp = state.iter.Timestamp()
 	state.valid = true
-
-	provider := state.iter.(TimestampProvider)
-	state.timestamp = provider.CurrentTimestamp()
 
 	return true
 }
@@ -155,6 +149,13 @@ func (ci *Compound) Value() []byte {
 		return nil
 	}
 	return ci.current.value
+}
+
+func (ci *Compound) Timestamp() time.Time {
+	if ci.current == nil || ci.closed {
+		return time.Time{}
+	}
+	return ci.current.timestamp
 }
 
 func (ci *Compound) Err() error {

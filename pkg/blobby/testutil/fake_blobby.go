@@ -3,6 +3,7 @@ package testutil
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/adammck/blobby/pkg/api"
 	"github.com/jonboulle/clockwork"
@@ -146,6 +147,10 @@ func (it *fakeIterator) Value() []byte {
 
 func (it *fakeIterator) Err() error {
 	return it.err
+}
+
+func (it *fakeIterator) Timestamp() time.Time {
+	return time.Now()
 }
 
 func (it *fakeIterator) Close() error {
