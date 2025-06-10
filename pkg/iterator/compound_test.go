@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type mockIterator struct {
+type mockIter struct {
 	records []mockRecord
 	pos     int
 	closed  bool
@@ -23,89 +23,95 @@ type mockRecord struct {
 	timestamp time.Time
 }
 
-func (m *mockIterator) Next(ctx context.Context) bool {
+func (m *mockIter) Next(ctx context.Context) bool {
 	if m.closed || m.err != nil || m.pos >= len(m.records) {
 		return false
 	}
+
 	m.pos++
 	return true
 }
 
-func (m *mockIterator) Key() string {
+func (m *mockIter) Key() string {
 	if m.pos <= 0 || m.pos > len(m.records) {
 		return ""
 	}
+
 	return m.records[m.pos-1].key
 }
 
-func (m *mockIterator) Value() []byte {
+func (m *mockIter) Value() []byte {
 	if m.pos <= 0 || m.pos > len(m.records) {
 		return nil
 	}
+
 	return m.records[m.pos-1].value
 }
 
-func (m *mockIterator) Timestamp() time.Time {
+func (m *mockIter) Timestamp() time.Time {
 	if m.pos <= 0 || m.pos > len(m.records) {
 		return time.Time{}
 	}
+
 	return m.records[m.pos-1].timestamp
 }
 
-func (m *mockIterator) Err() error {
+func (m *mockIter) Err() error {
 	return m.err
 }
 
-func (m *mockIterator) Close() error {
+func (m *mockIter) Close() error {
 	m.closed = true
 	return nil
 }
 
 func TestIteratorHeapOrdering(t *testing.T) {
-	baseTime := time.Now().Truncate(time.Second)
+	ts := time.Now().Truncate(time.Second)
 
-	states := []*iteratorState{
+	states := []*iterState{
 		{
 			key:       "same",
-			timestamp: baseTime.Add(1 * time.Second),
+			timestamp: ts.Add(1 * time.Second),
 		},
 		{
 			key:       "same",
-			timestamp: baseTime,
+			timestamp: ts,
 		},
 		{
 			key:       "different",
-			timestamp: baseTime,
+			timestamp: ts,
 		},
 	}
 
-	h := iteratorHeap(states)
+	h := iterHeap(states)
 	heap.Init(&h)
 
-	state1 := heap.Pop(&h).(*iteratorState)
-	require.Equal(t, "different", state1.key)
+	s1 := heap.Pop(&h).(*iterState)
+	require.Equal(t, "different", s1.key)
 
-	state2 := heap.Pop(&h).(*iteratorState)
-	require.Equal(t, "same", state2.key)
-	require.Equal(t, baseTime.Add(1*time.Second), state2.timestamp)
+	s2 := heap.Pop(&h).(*iterState)
+	require.Equal(t, "same", s2.key)
+	require.Equal(t, ts.Add(1*time.Second), s2.timestamp)
 
-	state3 := heap.Pop(&h).(*iteratorState)
-	require.Equal(t, "same", state3.key)
-	require.Equal(t, baseTime, state3.timestamp)
+	s3 := heap.Pop(&h).(*iterState)
+	require.Equal(t, "same", s3.key)
+	require.Equal(t, ts, s3.timestamp)
 }
 
 func TestCompoundWithEmptyIterators(t *testing.T) {
 	ctx := context.Background()
 
-	iterators := []api.Iterator{
-		&mockIterator{records: nil},
-		&mockIterator{records: []mockRecord{
-			{key: "key1", value: []byte("val1"), timestamp: time.Now()},
+	ts := time.Now().Truncate(time.Second)
+
+	iters := []api.Iterator{
+		&mockIter{records: nil},
+		&mockIter{records: []mockRecord{
+			{key: "key1", value: []byte("val1"), timestamp: ts},
 		}},
-		&mockIterator{records: nil},
+		&mockIter{records: nil},
 	}
 
-	compound := NewCompound(ctx, iterators, []string{"empty1", "valid", "empty2"})
+	compound := New(ctx, iters, []string{"empty1", "valid", "empty2"})
 	defer compound.Close()
 
 	require.True(t, compound.Next(ctx))
@@ -118,80 +124,78 @@ func TestCompoundWithEmptyIterators(t *testing.T) {
 
 func TestCompoundDuplicateHandling(t *testing.T) {
 	ctx := context.Background()
-	baseTime := time.Now().Truncate(time.Second)
+	ts := time.Now().Truncate(time.Second)
 
-	iterators := []api.Iterator{
-		&mockIterator{records: []mockRecord{
-			{key: "key1", value: []byte("newer"), timestamp: baseTime.Add(1 * time.Second)},
-			{key: "key2", value: []byte("val2"), timestamp: baseTime},
+	iters := []api.Iterator{
+		&mockIter{records: []mockRecord{
+			{key: "key1", value: []byte("newer"), timestamp: ts.Add(1 * time.Second)},
+			{key: "key2", value: []byte("val2"), timestamp: ts},
 		}},
-		&mockIterator{records: []mockRecord{
-			{key: "key1", value: []byte("older"), timestamp: baseTime},
-			{key: "key3", value: []byte("val3"), timestamp: baseTime},
+		&mockIter{records: []mockRecord{
+			{key: "key1", value: []byte("older"), timestamp: ts},
+			{key: "key3", value: []byte("val3"), timestamp: ts},
 		}},
 	}
 
-	compound := NewCompound(ctx, iterators, []string{"iter1", "iter2"})
+	compound := New(ctx, iters, []string{"iter1", "iter2"})
 	defer compound.Close()
 
-	results := make(map[string][]byte)
+	res := make(map[string][]byte)
 	for compound.Next(ctx) {
-		results[compound.Key()] = compound.Value()
+		res[compound.Key()] = compound.Value()
 	}
 	require.NoError(t, compound.Err())
 
-	expected := map[string][]byte{
+	require.Equal(t, map[string][]byte{
 		"key1": []byte("newer"),
 		"key2": []byte("val2"),
 		"key3": []byte("val3"),
-	}
-	require.Equal(t, expected, results)
+	}, res)
 }
 
 func TestCompoundTombstoneHandling(t *testing.T) {
 	ctx := context.Background()
-	baseTime := time.Now().Truncate(time.Second)
+	ts := time.Now().Truncate(time.Second)
 
-	iterators := []api.Iterator{
-		&mockIterator{records: []mockRecord{
-			{key: "key1", value: []byte{}, timestamp: baseTime.Add(1 * time.Second)},
-			{key: "key2", value: []byte("live"), timestamp: baseTime},
+	iters := []api.Iterator{
+		&mockIter{records: []mockRecord{
+			{key: "key1", value: []byte{}, timestamp: ts.Add(1 * time.Second)},
+			{key: "key2", value: []byte("live"), timestamp: ts},
 		}},
-		&mockIterator{records: []mockRecord{
-			{key: "key1", value: []byte("old_value"), timestamp: baseTime},
+		&mockIter{records: []mockRecord{
+			{key: "key1", value: []byte("old_value"), timestamp: ts},
 		}},
 	}
 
-	compound := NewCompound(ctx, iterators, []string{"iter1", "iter2"})
+	compound := New(ctx, iters, []string{"iter1", "iter2"})
 	defer compound.Close()
 
-	results := make(map[string][]byte)
+	res := make(map[string][]byte)
 	for compound.Next(ctx) {
-		results[compound.Key()] = compound.Value()
+		res[compound.Key()] = compound.Value()
 	}
 	require.NoError(t, compound.Err())
 
-	expected := map[string][]byte{
+	require.Equal(t, map[string][]byte{
 		"key2": []byte("live"),
-	}
-	require.Equal(t, expected, results)
+	}, res)
 }
 
 func TestCompoundKeyOrdering(t *testing.T) {
 	ctx := context.Background()
-	baseTime := time.Now().Truncate(time.Second)
+	ts := time.Now().Truncate(time.Second)
 
-	iterators := []api.Iterator{
-		&mockIterator{records: []mockRecord{
-			{key: "apple", value: []byte("a"), timestamp: baseTime},
-			{key: "zebra", value: []byte("z"), timestamp: baseTime},
+	iters := []api.Iterator{
+		&mockIter{records: []mockRecord{
+			{key: "apple", value: []byte("a"), timestamp: ts},
+			{key: "zebra", value: []byte("z"), timestamp: ts},
 		}},
-		&mockIterator{records: []mockRecord{
-			{key: "banana", value: []byte("b"), timestamp: baseTime},
+		&mockIter{records: []mockRecord{
+			{key: "banana", value: []byte("b"), timestamp: ts},
 		}},
 	}
 
-	compound := NewCompound(ctx, iterators, []string{"iter1", "iter2"})
+	compound := New(ctx, iters, []string{"iter1", "iter2"})
 	defer compound.Close()
 
 	var keys []string
@@ -200,21 +204,21 @@ func TestCompoundKeyOrdering(t *testing.T) {
 	}
 	require.NoError(t, compound.Err())
 
-	expected := []string{"apple", "banana", "zebra"}
-	require.Equal(t, expected, keys)
+	require.Equal(t, []string{"apple", "banana", "zebra"}, keys)
 }
 
 func TestCompoundContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	ts := time.Now().Truncate(time.Second)
 
-	iterators := []api.Iterator{
-		&mockIterator{records: []mockRecord{
-			{key: "key1", value: []byte("val1"), timestamp: time.Now()},
-			{key: "key2", value: []byte("val2"), timestamp: time.Now()},
+	iters := []api.Iterator{
+		&mockIter{records: []mockRecord{
+			{key: "key1", value: []byte("val1"), timestamp: ts},
+			{key: "key2", value: []byte("val2"), timestamp: ts},
 		}},
 	}
 
-	compound := NewCompound(ctx, iterators, []string{"iter1"})
+	compound := New(ctx, iters, []string{"iter1"})
 	defer compound.Close()
 
 	require.True(t, compound.Next(ctx))
@@ -229,16 +233,17 @@ func TestCompoundContextCancellation(t *testing.T) {
 
 func TestCompoundCloseResourceCleanup(t *testing.T) {
 	ctx := context.Background()
+	ts := time.Now().Truncate(time.Second)
 
-	mock1 := &mockIterator{records: []mockRecord{
-		{key: "key1", value: []byte("val1"), timestamp: time.Now()},
+	mock1 := &mockIter{records: []mockRecord{
+		{key: "key1", value: []byte("val1"), timestamp: ts},
 	}}
-	mock2 := &mockIterator{records: []mockRecord{
-		{key: "key2", value: []byte("val2"), timestamp: time.Now()},
+	mock2 := &mockIter{records: []mockRecord{
+		{key: "key2", value: []byte("val2"), timestamp: ts},
 	}}
 
-	iterators := []api.Iterator{mock1, mock2}
-	compound := NewCompound(ctx, iterators, []string{"iter1", "iter2"})
+	iters := []api.Iterator{mock1, mock2}
+	compound := New(ctx, iters, []string{"iter1", "iter2"})
 
 	require.True(t, compound.Next(ctx))
 
@@ -255,14 +260,15 @@ func TestCompoundCloseResourceCleanup(t *testing.T) {
 
 func TestCompoundEmptyHeap(t *testing.T) {
 	ctx := context.Background()
+	ts := time.Now().Truncate(time.Second)
 
-	iterators := []api.Iterator{
-		&mockIterator{records: []mockRecord{
-			{key: "only", value: []byte("record"), timestamp: time.Now()},
+	iters := []api.Iterator{
+		&mockIter{records: []mockRecord{
+			{key: "only", value: []byte("record"), timestamp: ts},
 		}},
 	}
 
-	compound := NewCompound(ctx, iterators, []string{"iter1"})
+	compound := New(ctx, iters, []string{"iter1"})
 	defer compound.Close()
 
 	require.True(t, compound.Next(ctx))

@@ -5,21 +5,22 @@ import (
 	"context"
 	"time"
 
+	"slices"
+
 	"github.com/adammck/blobby/pkg/api"
 )
 
 type Compound struct {
-	ctx            context.Context
-	heap           *iteratorHeap
-	current        *iteratorState
-	lastEmittedKey string
-	err            error
-	exhausted      bool
-	allIterators   []api.Iterator
-	closed         bool
+	heap      *iterHeap
+	current   *iterState
+	lastKey   string
+	err       error
+	exhausted bool
+	iterators []api.Iterator
+	closed    bool
 }
 
-type iteratorState struct {
+type iterState struct {
 	iter      api.Iterator
 	key       string
 	value     []byte
@@ -28,24 +29,29 @@ type iteratorState struct {
 	valid     bool
 }
 
-type iteratorHeap []*iteratorState
+type iterHeap []*iterState
 
-func (h iteratorHeap) Len() int { return len(h) }
+func (h iterHeap) Len() int {
+	return len(h)
+}
 
-func (h iteratorHeap) Less(i, j int) bool {
+func (h iterHeap) Less(i, j int) bool {
 	if h[i].key != h[j].key {
 		return h[i].key < h[j].key
 	}
+
 	return h[i].timestamp.After(h[j].timestamp)
 }
 
-func (h iteratorHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
-
-func (h *iteratorHeap) Push(x interface{}) {
-	*h = append(*h, x.(*iteratorState))
+func (h iterHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
 }
 
-func (h *iteratorHeap) Pop() interface{} {
+func (h *iterHeap) Push(x any) {
+	*h = append(*h, x.(*iterState))
+}
+
+func (h *iterHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
 	item := old[n-1]
@@ -53,37 +59,36 @@ func (h *iteratorHeap) Pop() interface{} {
 	return item
 }
 
-func NewCompound(ctx context.Context, iterators []api.Iterator, sources []string) *Compound {
-	ci := &Compound{
-		ctx:          ctx,
-		heap:         &iteratorHeap{},
-		allIterators: append([]api.Iterator(nil), iterators...),
+func New(ctx context.Context, iters []api.Iterator, sources []string) *Compound {
+	c := &Compound{
+		heap:      &iterHeap{},
+		iterators: slices.Clone(iters),
 	}
 
-	for i, iter := range iterators {
-		state := &iteratorState{
+	for i, iter := range iters {
+		s := &iterState{
 			iter:   iter,
 			source: sources[i],
 		}
 
-		if advanceIteratorState(ctx, state) {
-			heap.Push(ci.heap, state)
+		if advanceIterState(ctx, s) {
+			heap.Push(c.heap, s)
 		}
 	}
 
-	return ci
+	return c
 }
 
-func advanceIteratorState(ctx context.Context, state *iteratorState) bool {
-	if !state.iter.Next(ctx) {
-		state.valid = false
+func advanceIterState(ctx context.Context, s *iterState) bool {
+	if !s.iter.Next(ctx) {
+		s.valid = false
 		return false
 	}
 
-	state.key = state.iter.Key()
-	state.value = state.iter.Value()
-	state.timestamp = state.iter.Timestamp()
-	state.valid = true
+	s.key = s.iter.Key()
+	s.value = s.iter.Value()
+	s.timestamp = s.iter.Timestamp()
+	s.valid = true
 
 	return true
 }
@@ -106,31 +111,31 @@ func (ci *Compound) Next(ctx context.Context) bool {
 			return false
 		}
 
-		state := heap.Pop(ci.heap).(*iteratorState)
+		s := heap.Pop(ci.heap).(*iterState)
 
-		if state.key == ci.lastEmittedKey {
-			if advanceIteratorState(ctx, state) {
-				heap.Push(ci.heap, state)
+		if s.key == ci.lastKey {
+			if advanceIterState(ctx, s) {
+				heap.Push(ci.heap, s)
 			}
 			continue
 		}
 
-		if len(state.value) == 0 {
-			ci.lastEmittedKey = state.key
-			if advanceIteratorState(ctx, state) {
-				heap.Push(ci.heap, state)
+		if len(s.value) == 0 {
+			ci.lastKey = s.key
+			if advanceIterState(ctx, s) {
+				heap.Push(ci.heap, s)
 			}
 			continue
 		}
 
-		ci.current = &iteratorState{
-			key:   state.key,
-			value: append([]byte(nil), state.value...),
+		ci.current = &iterState{
+			key:   s.key,
+			value: slices.Clone(s.value),
 		}
-		ci.lastEmittedKey = state.key
+		ci.lastKey = s.key
 
-		if advanceIteratorState(ctx, state) {
-			heap.Push(ci.heap, state)
+		if advanceIterState(ctx, s) {
+			heap.Push(ci.heap, s)
 		}
 
 		return true
@@ -141,6 +146,7 @@ func (ci *Compound) Key() string {
 	if ci.current == nil || ci.closed {
 		return ""
 	}
+
 	return ci.current.key
 }
 
@@ -148,6 +154,7 @@ func (ci *Compound) Value() []byte {
 	if ci.current == nil || ci.closed {
 		return nil
 	}
+
 	return ci.current.value
 }
 
@@ -155,6 +162,7 @@ func (ci *Compound) Timestamp() time.Time {
 	if ci.current == nil || ci.closed {
 		return time.Time{}
 	}
+
 	return ci.current.timestamp
 }
 
@@ -168,10 +176,11 @@ func (ci *Compound) Close() error {
 	}
 	ci.closed = true
 
-	for _, iter := range ci.allIterators {
+	for _, iter := range ci.iterators {
 		if err := iter.Close(); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
