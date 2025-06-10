@@ -93,90 +93,94 @@ func advanceIterState(ctx context.Context, s *iterState) bool {
 	return true
 }
 
-func (ci *Compound) Next(ctx context.Context) bool {
-	if ci.exhausted || ci.err != nil || ci.closed {
+func (c *Compound) Next(ctx context.Context) bool {
+	if c.exhausted || c.err != nil || c.closed {
 		return false
 	}
 
 	select {
 	case <-ctx.Done():
-		ci.err = ctx.Err()
+		c.err = ctx.Err()
 		return false
 	default:
 	}
 
 	for {
-		if ci.heap.Len() == 0 {
-			ci.exhausted = true
+		if c.heap.Len() == 0 {
+			c.exhausted = true
 			return false
 		}
 
-		s := heap.Pop(ci.heap).(*iterState)
+		s := heap.Pop(c.heap).(*iterState)
 
-		if s.key == ci.lastKey {
+		if s.key == c.lastKey {
 			if advanceIterState(ctx, s) {
-				heap.Push(ci.heap, s)
+				heap.Push(c.heap, s)
 			}
 			continue
 		}
 
 		if len(s.value) == 0 {
-			ci.lastKey = s.key
+			c.lastKey = s.key
 			if advanceIterState(ctx, s) {
-				heap.Push(ci.heap, s)
+				heap.Push(c.heap, s)
 			}
 			continue
 		}
 
-		ci.current = &iterState{
-			key:   s.key,
-			value: slices.Clone(s.value),
+		c.current = &iterState{
+			key:       s.key,
+			value:     slices.Clone(s.value),
+			timestamp: s.timestamp,
 		}
-		ci.lastKey = s.key
+		c.lastKey = s.key
 
 		if advanceIterState(ctx, s) {
-			heap.Push(ci.heap, s)
+			heap.Push(c.heap, s)
 		}
 
 		return true
 	}
 }
 
-func (ci *Compound) Key() string {
-	if ci.current == nil || ci.closed {
+func (c *Compound) Key() string {
+	if c.current == nil || c.closed {
 		return ""
 	}
 
-	return ci.current.key
+	return c.current.key
 }
 
-func (ci *Compound) Value() []byte {
-	if ci.current == nil || ci.closed {
+func (c *Compound) Value() []byte {
+	if c.current == nil || c.closed {
 		return nil
 	}
 
-	return ci.current.value
+	return c.current.value
 }
 
-func (ci *Compound) Timestamp() time.Time {
-	if ci.current == nil || ci.closed {
+func (c *Compound) Timestamp() time.Time {
+	if c.current == nil || c.closed {
 		return time.Time{}
 	}
 
-	return ci.current.timestamp
+	return c.current.timestamp
 }
 
-func (ci *Compound) Err() error {
-	return ci.err
-}
-
-func (ci *Compound) Close() error {
-	if ci.closed {
+func (c *Compound) Err() error {
+	if c.closed {
 		return nil
 	}
-	ci.closed = true
+	return c.err
+}
 
-	for _, iter := range ci.iterators {
+func (c *Compound) Close() error {
+	if c.closed {
+		return nil
+	}
+	c.closed = true
+
+	for _, iter := range c.iterators {
 		if err := iter.Close(); err != nil {
 			return err
 		}
