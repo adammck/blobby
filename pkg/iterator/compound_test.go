@@ -278,3 +278,20 @@ func TestCompoundEmptyHeap(t *testing.T) {
 	require.False(t, compound.Next(ctx))
 	require.NoError(t, compound.Err())
 }
+
+func TestCompoundTimestamp(t *testing.T) {
+	ctx := context.Background()
+	ts := time.Now().Truncate(time.Second)
+
+	iters := []api.Iterator{
+		&mockIter{records: []mockRecord{
+			{key: "key1", value: []byte("val1"), timestamp: ts},
+		}},
+	}
+
+	compound := New(ctx, iters, []string{"iter1"})
+	defer compound.Close()
+
+	require.True(t, compound.Next(ctx))
+	require.Equal(t, ts, compound.Timestamp())
+}
