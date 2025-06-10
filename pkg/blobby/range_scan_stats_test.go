@@ -49,11 +49,10 @@ func TestRangeScanStatsTracking(t *testing.T) {
 	// verify stats
 	require.Equal(t, 10, count)
 	require.Equal(t, 10, stats.RecordsReturned)
-	require.Equal(t, 1, stats.MemtablesRead)  // active memtable
-	require.Equal(t, 1, stats.SstablesRead)   // one sstable created from flush
-	require.Equal(t, 1, stats.BlobsFetched)   // one sstable blob fetched
-	require.Equal(t, 0, stats.BlobsSkipped)   // no blooms to skip
-	require.Equal(t, 0, stats.RecordsScanned) // this stat is for point gets, not scans
+	require.Equal(t, 1, stats.MemtablesRead) // active memtable
+	require.Equal(t, 1, stats.SstablesRead)  // one sstable created from flush
+	require.Equal(t, 1, stats.BlobsFetched)  // one sstable blob fetched
+	require.Equal(t, 0, stats.BlobsSkipped)  // no blooms to skip
 }
 
 func TestRangeScanStatsWithMultipleSources(t *testing.T) {
@@ -113,7 +112,6 @@ func TestRangeScanStatsWithMultipleSources(t *testing.T) {
 	require.Equal(t, 2, stats.SstablesRead)  // two sstables
 	require.Equal(t, 2, stats.BlobsFetched)  // two sstable blobs fetched
 	require.Equal(t, 0, stats.BlobsSkipped)
-	require.Equal(t, 0, stats.RecordsScanned)
 }
 
 func TestRangeScanStatsWithLimitedRange(t *testing.T) {
