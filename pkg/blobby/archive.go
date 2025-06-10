@@ -318,11 +318,15 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 
 	var iterators []api.Iterator
 	var sources []string
+	var handles []*memtable.Handle
 	var needsCleanup = true
 
 	// cleanup function for error handling
 	cleanup := func() {
 		if needsCleanup {
+			for _, h := range handles {
+				h.Release()
+			}
 			for _, it := range iterators {
 				it.Close()
 			}
@@ -352,10 +356,10 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 		}
 
 		handle.AddRef()
+		handles = append(handles, handle)
 
 		iter, err := b.mt.Scan(ctx, name, start, end)
 		if err != nil {
-			handle.Release() // release on error
 			cleanup()
 			return nil, stats, fmt.Errorf("memtable.Scan(%s): %w", name, err)
 		}
@@ -379,6 +383,14 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 	}
 
 	for _, meta := range metas {
+		// skip sstables that can't contain keys in our range
+		if end != "" && meta.MinKey >= end {
+			continue
+		}
+		if start != "" && meta.MaxKey < start {
+			continue
+		}
+
 		reader, err := b.sstm.GetFull(ctx, meta.Filename())
 		if err != nil {
 			cleanup()
@@ -414,6 +426,9 @@ type countingIterator struct {
 }
 
 func (c *countingIterator) Next(ctx context.Context) bool {
+	if c.inner == nil {
+		return false
+	}
 	hasNext := c.inner.Next(ctx)
 	if hasNext {
 		c.stats.RecordsReturned++
@@ -422,22 +437,37 @@ func (c *countingIterator) Next(ctx context.Context) bool {
 }
 
 func (c *countingIterator) Key() string {
+	if c.inner == nil {
+		return ""
+	}
 	return c.inner.Key()
 }
 
 func (c *countingIterator) Value() []byte {
+	if c.inner == nil {
+		return nil
+	}
 	return c.inner.Value()
 }
 
 func (c *countingIterator) Timestamp() time.Time {
+	if c.inner == nil {
+		return time.Time{}
+	}
 	return c.inner.Timestamp()
 }
 
 func (c *countingIterator) Err() error {
+	if c.inner == nil {
+		return nil
+	}
 	return c.inner.Err()
 }
 
 func (c *countingIterator) Close() error {
+	if c.inner == nil {
+		return nil
+	}
 	return c.inner.Close()
 }
 

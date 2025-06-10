@@ -41,7 +41,6 @@ type ScanStats struct {
 	RecordsReturned int
 	BlobsFetched    int
 	BlobsSkipped    int
-	RecordsScanned  int
 	MemtablesRead   int
 	SstablesRead    int
 }
