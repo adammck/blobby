@@ -14,6 +14,7 @@ import (
 	mfilterstore "github.com/adammck/blobby/pkg/impl/filterstore/mongo"
 	mindexstore "github.com/adammck/blobby/pkg/impl/indexstore/mongo"
 	"github.com/adammck/blobby/pkg/index"
+	"github.com/adammck/blobby/pkg/iterator"
 	"github.com/adammck/blobby/pkg/memtable"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
@@ -306,6 +307,182 @@ func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (
 	return rec, scanned, nil
 }
 
+// RangeScan returns an iterator for all keys in the range [start, end)
+func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator, *api.ScanStats, error) {
+	stats := &api.ScanStats{}
+
+	// validate range
+	if start > end && end != "" {
+		return nil, stats, fmt.Errorf("invalid range: start=%q > end=%q", start, end)
+	}
+
+	var iterators []api.Iterator
+	var sources []string
+	var handles []*memtable.Handle
+	var needsCleanup = true
+
+	// cleanup function for error handling
+	cleanup := func() {
+		if needsCleanup {
+			for _, h := range handles {
+				h.Release()
+			}
+			for _, it := range iterators {
+				it.Close()
+			}
+		}
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			cleanup()
+			panic(r)
+		}
+	}()
+
+	// collect memtable iterators with reference counting (newest first)
+	memtables, err := b.mt.ListMemtables(ctx)
+	if err != nil {
+		cleanup()
+		return nil, stats, fmt.Errorf("ListMemtables: %w", err)
+	}
+
+	for _, name := range memtables {
+		// get handle and add reference to prevent deletion during scan
+		handle, err := b.mt.GetHandle(ctx, name)
+		if err != nil {
+			cleanup()
+			return nil, stats, fmt.Errorf("GetHandle(%s): %w", name, err)
+		}
+
+		handle.AddRef()
+		handles = append(handles, handle)
+
+		iter, err := b.mt.Scan(ctx, name, start, end)
+		if err != nil {
+			cleanup()
+			return nil, stats, fmt.Errorf("memtable.Scan(%s): %w", name, err)
+		}
+
+		// wrap iterator to handle reference counting on close
+		refIter := &refCountingIterator{
+			Iterator: iter,
+			handle:   handle,
+		}
+
+		iterators = append(iterators, refIter)
+		sources = append(sources, "memtable:"+name)
+		stats.MemtablesRead++
+	}
+
+	// collect sstable iterators (by metadata ordering)
+	metas, err := b.md.GetAllMetas(ctx)
+	if err != nil {
+		cleanup()
+		return nil, stats, fmt.Errorf("metadata.GetAllMetas: %w", err)
+	}
+
+	for _, meta := range metas {
+		// skip sstables that can't contain keys in our range
+		if end != "" && meta.MinKey >= end {
+			continue
+		}
+		if start != "" && meta.MaxKey < start {
+			continue
+		}
+
+		reader, err := b.sstm.GetFull(ctx, meta.Filename())
+		if err != nil {
+			cleanup()
+			return nil, stats, fmt.Errorf("sstm.GetFull(%s): %w", meta.Filename(), err)
+		}
+
+		iter := sstable.NewRangeIterator(reader, start, end)
+		iterators = append(iterators, iter)
+		sources = append(sources, "sstable:"+meta.Filename())
+		stats.BlobsFetched++
+		stats.SstablesRead++
+	}
+
+	// create compound iterator
+	compound := iterator.New(ctx, iterators, sources)
+
+	// transfer ownership to compound iterator
+	needsCleanup = false
+
+	// wrap in counting iterator to track RecordsReturned
+	counting := &countingIterator{
+		inner: compound,
+		stats: stats,
+	}
+
+	return counting, stats, nil
+}
+
+// countingIterator wraps another iterator and tracks the number of records returned
+type countingIterator struct {
+	inner api.Iterator
+	stats *api.ScanStats
+}
+
+func (c *countingIterator) Next(ctx context.Context) bool {
+	if c.inner == nil {
+		return false
+	}
+	hasNext := c.inner.Next(ctx)
+	if hasNext {
+		c.stats.RecordsReturned++
+	}
+	return hasNext
+}
+
+func (c *countingIterator) Key() string {
+	if c.inner == nil {
+		return ""
+	}
+	return c.inner.Key()
+}
+
+func (c *countingIterator) Value() []byte {
+	if c.inner == nil {
+		return nil
+	}
+	return c.inner.Value()
+}
+
+func (c *countingIterator) Timestamp() time.Time {
+	if c.inner == nil {
+		return time.Time{}
+	}
+	return c.inner.Timestamp()
+}
+
+func (c *countingIterator) Err() error {
+	if c.inner == nil {
+		return nil
+	}
+	return c.inner.Err()
+}
+
+func (c *countingIterator) Close() error {
+	if c.inner == nil {
+		return nil
+	}
+	return c.inner.Close()
+}
+
+// refCountingIterator wraps a memtable iterator and tracks reference counts
+type refCountingIterator struct {
+	api.Iterator
+	handle *memtable.Handle
+}
+
+func (r *refCountingIterator) Close() error {
+	err := r.Iterator.Close()
+	r.handle.Release()
+	return err
+}
+
 func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 	stats := &api.FlushStats{}
 
@@ -376,14 +553,29 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 	stats.FlushedMemtable = hPrev.Name()
 	stats.Meta = meta
 
-	err = b.mt.Drop(ctx, hPrev.Name())
+	// only drop memtable if no active scans are using it
+	canDrop, err := b.mt.CanDropMemtable(ctx, hPrev.Name())
 	if err != nil {
-		return stats, fmt.Errorf("memtable.Drop: %w", err)
+		return stats, fmt.Errorf("CanDropMemtable: %w", err)
 	}
+
+	if canDrop {
+		err = b.mt.Drop(ctx, hPrev.Name())
+		if err != nil {
+			return stats, fmt.Errorf("memtable.Drop: %w", err)
+		}
+	}
+	// TODO: if we can't drop it now, we should retry later when refs reach zero
 
 	return stats, nil
 }
 
 func (b *Blobby) Compact(ctx context.Context, opts api.CompactionOptions) ([]*api.CompactionStats, error) {
 	return b.comp.Run(ctx, opts)
+}
+
+// ScanPrefix returns an iterator for all keys with the given prefix
+func (b *Blobby) ScanPrefix(ctx context.Context, prefix string) (api.Iterator, *api.ScanStats, error) {
+	end := prefix + "\xff"
+	return b.RangeScan(ctx, prefix, end)
 }
