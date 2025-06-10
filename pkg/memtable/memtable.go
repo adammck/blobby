@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
@@ -37,12 +38,17 @@ type Memtable struct {
 	mongoURL string
 	mongo    *mongo.Database
 	clock    clockwork.Clock
+
+	// handle registry for singleton handles
+	handlesMu sync.RWMutex
+	handles   map[string]*Handle
 }
 
 func New(mongoURL string, clock clockwork.Clock) *Memtable {
 	return &Memtable{
 		mongoURL: mongoURL,
 		clock:    clock,
+		handles:  make(map[string]*Handle),
 	}
 }
 
@@ -384,4 +390,40 @@ func (mt *Memtable) ListMemtables(ctx context.Context) ([]string, error) {
 		names[i] = mt.ID
 	}
 	return names, nil
+}
+
+// GetHandle returns a handle for the specified memtable
+func (mt *Memtable) GetHandle(ctx context.Context, name string) (*Handle, error) {
+	mt.handlesMu.RLock()
+	if handle, exists := mt.handles[name]; exists {
+		mt.handlesMu.RUnlock()
+		return handle, nil
+	}
+	mt.handlesMu.RUnlock()
+
+	mt.handlesMu.Lock()
+	defer mt.handlesMu.Unlock()
+
+	// double-check after acquiring write lock
+	if handle, exists := mt.handles[name]; exists {
+		return handle, nil
+	}
+
+	db, err := mt.GetMongo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("GetMongo: %w", err)
+	}
+
+	handle := NewHandle(db, name)
+	mt.handles[name] = handle
+	return handle, nil
+}
+
+// CanDropMemtable checks if a memtable can be safely dropped
+func (mt *Memtable) CanDropMemtable(ctx context.Context, name string) (bool, error) {
+	handle, err := mt.GetHandle(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	return handle.CanDrop(), nil
 }

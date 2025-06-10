@@ -41,6 +41,9 @@ type ScanStats struct {
 	RecordsReturned int
 	BlobsFetched    int
 	BlobsSkipped    int
+	RecordsScanned  int
+	MemtablesRead   int
+	SstablesRead    int
 }
 
 // Iterator provides ordered access to key-value pairs within a range.
@@ -152,6 +155,7 @@ type Blobby interface {
 	Put(ctx context.Context, key string, value []byte) (string, error)
 	Get(ctx context.Context, key string) ([]byte, *GetStats, error)
 	RangeScan(ctx context.Context, start, end string) (Iterator, *ScanStats, error)
+	ScanPrefix(ctx context.Context, prefix string) (Iterator, *ScanStats, error)
 	Flush(ctx context.Context) (*FlushStats, error)
 	Compact(ctx context.Context, opts CompactionOptions) ([]*CompactionStats, error)
 	Delete(ctx context.Context, key string) (*DeleteStats, error)
