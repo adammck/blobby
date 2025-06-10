@@ -364,7 +364,7 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 	}
 
 	// create compound iterator
-	compound := iterator.NewCompound(ctx, iterators, sources)
+	compound := iterator.New(ctx, iterators, sources)
 
 	// wrap in counting iterator to track RecordsReturned
 	counting := &countingIterator{
