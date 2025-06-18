@@ -1,4 +1,4 @@
-package blobby
+package iterator
 
 import (
 	"context"
@@ -7,20 +7,22 @@ import (
 	"github.com/adammck/blobby/pkg/api"
 )
 
-// countingIterator wraps another iterator and tracks the number of records returned
-type countingIterator struct {
+// Counting wraps another iterator and tracks the number of records returned
+type Counting struct {
 	inner api.Iterator
 	stats *api.ScanStats
 }
 
-func newCountingIterator(inner api.Iterator, stats *api.ScanStats) *countingIterator {
-	return &countingIterator{
+// NewCounting creates a new counting iterator that wraps the given iterator
+// and increments the RecordsReturned field in stats for each record consumed.
+func NewCounting(inner api.Iterator, stats *api.ScanStats) *Counting {
+	return &Counting{
 		inner: inner,
 		stats: stats,
 	}
 }
 
-func (c *countingIterator) Next(ctx context.Context) bool {
+func (c *Counting) Next(ctx context.Context) bool {
 	if c.inner == nil {
 		return false
 	}
@@ -31,35 +33,35 @@ func (c *countingIterator) Next(ctx context.Context) bool {
 	return hasNext
 }
 
-func (c *countingIterator) Key() string {
+func (c *Counting) Key() string {
 	if c.inner == nil {
 		return ""
 	}
 	return c.inner.Key()
 }
 
-func (c *countingIterator) Value() []byte {
+func (c *Counting) Value() []byte {
 	if c.inner == nil {
 		return nil
 	}
 	return c.inner.Value()
 }
 
-func (c *countingIterator) Timestamp() time.Time {
+func (c *Counting) Timestamp() time.Time {
 	if c.inner == nil {
 		return time.Time{}
 	}
 	return c.inner.Timestamp()
 }
 
-func (c *countingIterator) Err() error {
+func (c *Counting) Err() error {
 	if c.inner == nil {
 		return nil
 	}
 	return c.inner.Err()
 }
 
-func (c *countingIterator) Close() error {
+func (c *Counting) Close() error {
 	if c.inner == nil {
 		return nil
 	}

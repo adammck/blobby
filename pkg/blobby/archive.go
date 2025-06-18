@@ -411,7 +411,7 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 	needsCleanup = false
 
 	// wrap in counting iterator to track RecordsReturned
-	counting := newCountingIterator(compound, stats)
+	counting := iterator.NewCounting(compound, stats)
 
 	return counting, stats, nil
 }
