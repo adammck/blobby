@@ -411,65 +411,11 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 	needsCleanup = false
 
 	// wrap in counting iterator to track RecordsReturned
-	counting := &countingIterator{
-		inner: compound,
-		stats: stats,
-	}
+	counting := newCountingIterator(compound, stats)
 
 	return counting, stats, nil
 }
 
-// countingIterator wraps another iterator and tracks the number of records returned
-type countingIterator struct {
-	inner api.Iterator
-	stats *api.ScanStats
-}
-
-func (c *countingIterator) Next(ctx context.Context) bool {
-	if c.inner == nil {
-		return false
-	}
-	hasNext := c.inner.Next(ctx)
-	if hasNext {
-		c.stats.RecordsReturned++
-	}
-	return hasNext
-}
-
-func (c *countingIterator) Key() string {
-	if c.inner == nil {
-		return ""
-	}
-	return c.inner.Key()
-}
-
-func (c *countingIterator) Value() []byte {
-	if c.inner == nil {
-		return nil
-	}
-	return c.inner.Value()
-}
-
-func (c *countingIterator) Timestamp() time.Time {
-	if c.inner == nil {
-		return time.Time{}
-	}
-	return c.inner.Timestamp()
-}
-
-func (c *countingIterator) Err() error {
-	if c.inner == nil {
-		return nil
-	}
-	return c.inner.Err()
-}
-
-func (c *countingIterator) Close() error {
-	if c.inner == nil {
-		return nil
-	}
-	return c.inner.Close()
-}
 
 // refCountingIterator wraps a memtable iterator and tracks reference counts
 type refCountingIterator struct {
