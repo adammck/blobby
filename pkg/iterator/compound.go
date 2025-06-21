@@ -1,3 +1,5 @@
+// Package iterator provides utilities for merging multiple iterators
+// with MVCC (Multi-Version Concurrency Control) semantics.
 package iterator
 
 import (
@@ -10,6 +12,8 @@ import (
 	"github.com/adammck/blobby/pkg/api"
 )
 
+// Compound merges multiple iterators using a min-heap to provide
+// ordered iteration with MVCC semantics (most recent version wins).
 type Compound struct {
 	heap      *iterHeap
 	current   *iterState
@@ -51,7 +55,7 @@ func (h *iterHeap) Push(x any) {
 	*h = append(*h, x.(*iterState))
 }
 
-func (h *iterHeap) Pop() interface{} {
+func (h *iterHeap) Pop() any {
 	old := *h
 	n := len(old)
 	item := old[n-1]
@@ -59,6 +63,8 @@ func (h *iterHeap) Pop() interface{} {
 	return item
 }
 
+// New creates a compound iterator that merges multiple iterators.
+// The sources slice provides debugging information about each iterator.
 func New(ctx context.Context, iters []api.Iterator, sources []string) *Compound {
 	c := &Compound{
 		heap:      &iterHeap{},
@@ -82,6 +88,9 @@ func New(ctx context.Context, iters []api.Iterator, sources []string) *Compound 
 	return c
 }
 
+// advanceIterState advances an iterator state to the next record.
+// Returns (true, nil) if a record is available, (false, nil) if exhausted,
+// or (false, error) if an error occurred.
 func advanceIterState(ctx context.Context, s *iterState) (bool, error) {
 	if !s.iter.Next(ctx) {
 		s.valid = false

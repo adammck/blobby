@@ -7,7 +7,9 @@ import (
 	"github.com/adammck/blobby/pkg/api"
 )
 
-// Counting wraps another iterator and tracks the number of records returned
+// Counting wraps another iterator and tracks the number of records returned.
+// It updates the RecordsReturned field in the provided ScanStats for each
+// record consumed via Next().
 type Counting struct {
 	inner api.Iterator
 	stats *api.ScanStats

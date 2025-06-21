@@ -307,7 +307,9 @@ func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (
 	return rec, scanned, nil
 }
 
-// RangeScan returns an iterator for all keys in the range [start, end)
+// RangeScan returns an iterator for all keys in the range [start, end).
+// If end is empty, the scan is unbounded (all keys >= start).
+// The returned iterator must be closed to avoid resource leaks.
 func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator, *api.ScanStats, error) {
 	stats := &api.ScanStats{}
 
@@ -417,7 +419,8 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 }
 
 
-// refCountingIterator wraps a memtable iterator and tracks reference counts
+// refCountingIterator wraps a memtable iterator and manages reference counting
+// to prevent memtables from being dropped while scans are active.
 type refCountingIterator struct {
 	api.Iterator
 	handle *memtable.Handle
@@ -520,12 +523,14 @@ func (b *Blobby) Compact(ctx context.Context, opts api.CompactionOptions) ([]*ap
 	return b.comp.Run(ctx, opts)
 }
 
-// ScanPrefix returns an iterator for all keys with the given prefix
+// ScanPrefix returns an iterator for all keys with the given prefix.
+// If prefix is empty, all keys are returned.
+// The returned iterator must be closed to avoid resource leaks.
 func (b *Blobby) ScanPrefix(ctx context.Context, prefix string) (api.Iterator, *api.ScanStats, error) {
 	if prefix == "" {
 		return b.RangeScan(ctx, "", "")
 	}
-	
+
 	// Calculate the next possible prefix by incrementing the last byte
 	// This handles UTF-8 properly by working at the byte level
 	end := incrementPrefix(prefix)
@@ -538,10 +543,10 @@ func incrementPrefix(prefix string) string {
 	if prefix == "" {
 		return ""
 	}
-	
+
 	// Convert to bytes for manipulation
 	bytes := []byte(prefix)
-	
+
 	// Find the last byte that can be incremented
 	for i := len(bytes) - 1; i >= 0; i-- {
 		if bytes[i] < 0xff {
@@ -550,7 +555,7 @@ func incrementPrefix(prefix string) string {
 			return string(bytes[:i+1])
 		}
 	}
-	
+
 	// All bytes were 0xff, so there's no valid upper bound
 	// Return empty string to indicate unbounded scan
 	return ""
