@@ -71,7 +71,10 @@ func New(ctx context.Context, iters []api.Iterator, sources []string) *Compound 
 			source: sources[i],
 		}
 
-		if advanceIterState(ctx, s) {
+		if ok, err := advanceIterState(ctx, s); err != nil {
+			// Store error in compound iterator for later retrieval
+			c.err = err
+		} else if ok {
 			heap.Push(c.heap, s)
 		}
 	}
@@ -79,10 +82,14 @@ func New(ctx context.Context, iters []api.Iterator, sources []string) *Compound 
 	return c
 }
 
-func advanceIterState(ctx context.Context, s *iterState) bool {
+func advanceIterState(ctx context.Context, s *iterState) (bool, error) {
 	if !s.iter.Next(ctx) {
 		s.valid = false
-		return false
+		// Check if the iterator failed with an error
+		if err := s.iter.Err(); err != nil {
+			return false, err
+		}
+		return false, nil
 	}
 
 	s.key = s.iter.Key()
@@ -90,7 +97,7 @@ func advanceIterState(ctx context.Context, s *iterState) bool {
 	s.timestamp = s.iter.Timestamp()
 	s.valid = true
 
-	return true
+	return true, nil
 }
 
 func (c *Compound) Next(ctx context.Context) bool {
@@ -114,7 +121,10 @@ func (c *Compound) Next(ctx context.Context) bool {
 		s := heap.Pop(c.heap).(*iterState)
 
 		if s.key == c.lastKey {
-			if advanceIterState(ctx, s) {
+			if ok, err := advanceIterState(ctx, s); err != nil {
+				c.err = err
+				return false
+			} else if ok {
 				heap.Push(c.heap, s)
 			}
 			continue
@@ -122,7 +132,10 @@ func (c *Compound) Next(ctx context.Context) bool {
 
 		if len(s.value) == 0 {
 			c.lastKey = s.key
-			if advanceIterState(ctx, s) {
+			if ok, err := advanceIterState(ctx, s); err != nil {
+				c.err = err
+				return false
+			} else if ok {
 				heap.Push(c.heap, s)
 			}
 			continue
@@ -135,7 +148,10 @@ func (c *Compound) Next(ctx context.Context) bool {
 		}
 		c.lastKey = s.key
 
-		if advanceIterState(ctx, s) {
+		if ok, err := advanceIterState(ctx, s); err != nil {
+			c.err = err
+			return false
+		} else if ok {
 			heap.Push(c.heap, s)
 		}
 
