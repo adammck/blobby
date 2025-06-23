@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -76,13 +77,7 @@ func (m *FakeBlobby) Scan(ctx context.Context, start, end string) (api.Iterator,
 	}
 
 	// sort keys
-	for i := 0; i < len(keys)-1; i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if keys[i] > keys[j] {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
+	sort.Strings(keys)
 
 	return &fakeIterator{
 		data: m.data,

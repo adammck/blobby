@@ -14,14 +14,14 @@ func IncrementPrefix(prefix string) string {
 	}
 
 	// Convert to bytes for manipulation
-	bytes := []byte(prefix)
+	bs := []byte(prefix)
 
 	// Find the last byte that can be incremented
-	for i := len(bytes) - 1; i >= 0; i-- {
-		if bytes[i] < 0xff {
-			bytes[i]++
+	for i := len(bs) - 1; i >= 0; i-- {
+		if bs[i] < 0xff {
+			bs[i]++
 			// Truncate any trailing bytes that were 0xff
-			return string(bytes[:i+1])
+			return string(bs[:i+1])
 		}
 	}
 
