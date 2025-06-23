@@ -52,6 +52,10 @@ func (s *Harness) Compact() Op {
 	return CompactOp{h: s}
 }
 
+func (s *Harness) Scan(start, end string) Op {
+	return ScanOp{h: s, start: start, end: end}
+}
+
 func (h *Harness) Verify(ctx context.Context, t *testing.T) {
 	t.Log("Verifying final state...")
 	var verified int
@@ -157,12 +161,12 @@ func (o GetOp) String() string {
 
 func (o GetOp) Run(t *testing.T, ctx context.Context) error {
 	val, stats, err := o.h.sut.Get(ctx, o.k)
-	
+
 	// handle unexpected errors early
 	if err != nil && !errors.Is(err, &api.NotFound{}) {
 		return fmt.Errorf("get: %v", err)
 	}
-	
+
 	// handle notfound case early
 	if errors.Is(err, &api.NotFound{}) {
 		_, _, modelErr := o.h.model.Get(ctx, o.k)
@@ -261,6 +265,71 @@ func (o CompactOp) Run(t *testing.T, ctx context.Context) error {
 		t.Logf("Compact: %d input files, %d output files",
 			len(stats[0].Inputs), len(stats[0].Outputs))
 	}
+
+	return nil
+}
+
+type ScanOp struct {
+	h     *Harness
+	start string
+	end   string
+}
+
+func (o ScanOp) String() string {
+	return fmt.Sprintf("scan [%q, %q)", o.start, o.end)
+}
+
+func (o ScanOp) Run(t *testing.T, ctx context.Context) error {
+	iter, _, err := o.h.sut.Scan(ctx, o.start, o.end)
+	if err != nil {
+		return fmt.Errorf("sut.Scan: %w", err)
+	}
+	defer iter.Close()
+
+	modelIter, _, err := o.h.model.Scan(ctx, o.start, o.end)
+	if err != nil {
+		return fmt.Errorf("model.Scan: %w", err)
+	}
+	defer modelIter.Close()
+
+	// verify both iterators produce same results in same order
+	var count int
+	for {
+		sutHasNext := iter.Next(ctx)
+		modelHasNext := modelIter.Next(ctx)
+
+		if sutHasNext != modelHasNext {
+			return fmt.Errorf("iterator length mismatch at position %d", count)
+		}
+
+		if !sutHasNext {
+			break
+		}
+
+		if iter.Key() != modelIter.Key() {
+			return fmt.Errorf("key mismatch at position %d: sut=%q model=%q",
+				count, iter.Key(), modelIter.Key())
+		}
+
+		sutVal := iter.Value()
+		modelVal := modelIter.Value()
+		if !bytes.Equal(sutVal, modelVal) {
+			return fmt.Errorf("value mismatch for key %q: sut=%q model=%q",
+				iter.Key(), sutVal, modelVal)
+		}
+
+		count++
+	}
+
+	if iter.Err() != nil {
+		return fmt.Errorf("sut iterator error: %w", iter.Err())
+	}
+
+	if modelIter.Err() != nil {
+		return fmt.Errorf("model iterator error: %w", modelIter.Err())
+	}
+
+	t.Logf("Scan [%q, %q) -> %d keys", o.start, o.end, count)
 
 	return nil
 }

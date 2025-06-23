@@ -36,6 +36,38 @@ type DeleteStats struct {
 	Destination string
 }
 
+// ScanStats contains metadata about a range scan operation.
+// These statistics are populated incrementally during the scan:
+// - Source counts (MemtablesRead, SstablesRead, BlobsSkipped) are available immediately after Scan() returns
+// - RecordsReturned is updated as the iterator is consumed and only accurate after the scan completes
+type ScanStats struct {
+	RecordsReturned int // Updated incrementally as iterator is consumed
+	BlobsSkipped    int // Set when scan is created (currently unused in Scan, only in Get)
+	MemtablesRead   int // Set when scan is created
+	SstablesRead    int // Set when scan is created (SSTables actually read)
+}
+
+// Iterator provides ordered access to key-value pairs within a range.
+type Iterator interface {
+	// Next advances the iterator and returns true if a record is available.
+	Next(ctx context.Context) bool
+
+	// Key returns the current key. Only valid after Next() returns true.
+	Key() string
+
+	// Value returns the current value. Only valid after Next() returns true.
+	Value() []byte
+
+	// Timestamp returns the timestamp of the current record.
+	Timestamp() time.Time
+
+	// Err returns any error encountered during iteration.
+	Err() error
+
+	// Close releases resources associated with the iterator.
+	Close() error
+}
+
 type FlushStats struct {
 
 	// The URL of the memtable which was flushed.
@@ -123,6 +155,7 @@ type CompactionStats struct {
 type Blobby interface {
 	Put(ctx context.Context, key string, value []byte) (string, error)
 	Get(ctx context.Context, key string) ([]byte, *GetStats, error)
+	Scan(ctx context.Context, start, end string) (Iterator, *ScanStats, error)
 	Flush(ctx context.Context) (*FlushStats, error)
 	Compact(ctx context.Context, opts CompactionOptions) ([]*CompactionStats, error)
 	Delete(ctx context.Context, key string) (*DeleteStats, error)

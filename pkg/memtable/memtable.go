@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
+	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
 	"go.mongodb.org/mongo-driver/bson"
@@ -36,12 +38,19 @@ type Memtable struct {
 	mongoURL string
 	mongo    *mongo.Database
 	clock    clockwork.Clock
+
+	// Handle registry ensures one handle per memtable collection
+	// This is critical for reference counting to work correctly across
+	// concurrent operations (scans, flushes, compactions)
+	handlesMu sync.RWMutex
+	handles   map[string]*Handle
 }
 
 func New(mongoURL string, clock clockwork.Clock) *Memtable {
 	return &Memtable{
 		mongoURL: mongoURL,
 		clock:    clock,
+		handles:  make(map[string]*Handle),
 	}
 }
 
@@ -317,4 +326,113 @@ func (mt *Memtable) Drop(ctx context.Context, name string) error {
 	}
 
 	return nil
+}
+
+// Scan returns an iterator for all records in the memtable within the key range
+func (mt *Memtable) Scan(ctx context.Context, collName, start, end string) (api.Iterator, error) {
+	db, err := mt.GetMongo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("GetMongo: %w", err)
+	}
+
+	// build range query
+	filter := bson.M{}
+	if start != "" || end != "" {
+		keyFilter := bson.M{}
+		if start != "" {
+			keyFilter["$gte"] = start
+		}
+		if end != "" {
+			keyFilter["$lt"] = end
+		}
+		filter["key"] = keyFilter
+	}
+
+	// query sorted by key then by timestamp (newest first within each key)
+	cursor, err := db.Collection(collName).Find(
+		ctx,
+		filter,
+		options.Find().SetSort(bson.D{
+			{Key: "key", Value: 1},
+			{Key: "ts", Value: -1},
+		}))
+	if err != nil {
+		return nil, fmt.Errorf("Find: %w", err)
+	}
+
+	return &memtableIterator{
+		cursor: cursor,
+		ctx:    ctx,
+	}, nil
+}
+
+// ListMemtables returns all memtable names in creation order (newest first)
+func (mt *Memtable) ListMemtables(ctx context.Context) ([]string, error) {
+	db, err := mt.GetMongo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("GetMongo: %w", err)
+	}
+
+	cur, err := db.Collection(memtablesCollection).Find(
+		ctx,
+		bson.M{},
+		options.Find().SetSort(bson.D{{Key: "created", Value: -1}}))
+	if err != nil {
+		return nil, fmt.Errorf("db.Collection: %w", err)
+	}
+	defer cur.Close(ctx)
+
+	var memtables []memtableInfo
+	if err := cur.All(ctx, &memtables); err != nil {
+		return nil, fmt.Errorf("cur.All: %w", err)
+	}
+
+	names := make([]string, len(memtables))
+	for i, mt := range memtables {
+		names[i] = mt.ID
+	}
+	return names, nil
+}
+
+// GetHandle returns a singleton handle for the specified memtable.
+// The same handle is returned for multiple calls with the same name.
+// This ensures reference counting works correctly across concurrent operations.
+func (mt *Memtable) GetHandle(ctx context.Context, name string) (*Handle, error) {
+	// Fast path: check if handle exists with read lock
+	mt.handlesMu.RLock()
+	if handle, exists := mt.handles[name]; exists {
+		mt.handlesMu.RUnlock()
+		return handle, nil
+	}
+	mt.handlesMu.RUnlock()
+
+	// Slow path: create handle with write lock and double-check
+	mt.handlesMu.Lock()
+	defer mt.handlesMu.Unlock()
+	
+	// Double-check after acquiring write lock to handle race conditions:
+	// Two goroutines could pass the read lock check above, then compete
+	// for the write lock. The second one should use the handle created
+	// by the first one rather than creating a duplicate.
+	if handle, exists := mt.handles[name]; exists {
+		return handle, nil
+	}
+
+	db, err := mt.GetMongo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("GetMongo: %w", err)
+	}
+
+	handle := NewHandle(db, name)
+	mt.handles[name] = handle
+	return handle, nil
+}
+
+// CanDropMemtable checks if a memtable can be safely dropped
+func (mt *Memtable) CanDropMemtable(ctx context.Context, name string) (bool, error) {
+	handle, err := mt.GetHandle(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	return handle.CanDrop(), nil
 }

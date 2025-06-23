@@ -3,6 +3,7 @@ package memtable
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/adammck/blobby/pkg/types"
 	"go.mongodb.org/mongo-driver/bson"
@@ -11,8 +12,9 @@ import (
 )
 
 type Handle struct {
-	db   *mongo.Database
-	coll *mongo.Collection
+	db       *mongo.Database
+	coll     *mongo.Collection
+	refCount int32
 }
 
 func NewHandle(db *mongo.Database, name string) *Handle {
@@ -79,4 +81,24 @@ func (h *Handle) Create(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// AddRef increments the reference count for this handle
+func (h *Handle) AddRef() {
+	atomic.AddInt32(&h.refCount, 1)
+}
+
+// Release decrements the reference count for this handle
+func (h *Handle) Release() {
+	atomic.AddInt32(&h.refCount, -1)
+}
+
+// RefCount returns the current reference count
+func (h *Handle) RefCount() int32 {
+	return atomic.LoadInt32(&h.refCount)
+}
+
+// CanDrop returns true if this handle can be safely dropped (no active references)
+func (h *Handle) CanDrop() bool {
+	return h.RefCount() == 0
 }
