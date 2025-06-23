@@ -15,6 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `./blobby init` - Initialize datastore connections
 - `./blobby put` - Write records to memtable (reads JSON from stdin)
 - `./blobby get <key>` - Retrieve a record by key
+- `./blobby scan <start> <end>` - Range scan keys from start to end (exclusive)
 - `./blobby flush` - Flush active memtable to SSTable in blob storage
 - `./blobby compact` - Compact SSTables with various options
 
@@ -25,6 +26,7 @@ Required for operation:
 
 Optional:
 - `BLOBBY_RUN_CHAOS=1` - Enable chaos testing mode
+- `BLOBBY_TEST_MONGO=1` - Use real MongoDB in tests (default: mock cursors)
 
 ## Architecture
 
@@ -43,11 +45,12 @@ Optional:
 2. **Rotation**: Create new timestamped collection, atomically update active pointer
 3. **Flush**: Memtable → SSTable in blob storage, then drop flushed collection
 4. **Reads**: Check all memtables (newest first), then SSTables (using filters + indexes)
-5. **Compaction**: Merge SSTables based on size, age, or key overlap strategies
+5. **Scans**: Range iteration with snapshot isolation using compound iterators
+6. **Compaction**: Merge SSTables based on size, age, or key overlap strategies
 
 ### Key Interfaces (`pkg/api/`)
 
-- `Blobby` - Main interface (Put, Get, Delete, Flush, Compact)
+- `Blobby` - Main interface (Put, Get, Delete, Scan, Flush, Compact)
 - `BlobStore` - Abstract blob storage (S3 implementation in `pkg/impl/blobstore/s3/`)
 - `IndexStore` - SSTable key index storage (MongoDB implementation)
 - `FilterStore` - Bloom/XOR filter storage for efficient negative lookups
@@ -68,6 +71,7 @@ Records (`pkg/types/types.go`) use BSON encoding with:
 - **Concurrency**: All operations are context-aware and handle cancellation
 - **Timestamp Conflicts**: Retries with jitter if BSON timestamp collisions occur
 - **Chaos Testing**: Simulates failures during concurrent operations
+- **Range Scanning**: Snapshot isolation with reference-counted memtable handles
 
 ### Package Organization
 
@@ -75,4 +79,46 @@ Records (`pkg/types/types.go`) use BSON encoding with:
 - `pkg/impl/` - Concrete implementations of interfaces
 - `pkg/blobby/` - Main logic and orchestration
 - `pkg/types/` - Core data structures and serialization
+- `pkg/util/` - Helper utilities (e.g., prefix increment logic)
+- `pkg/iterator/` - Generic iterator utilities (Compound, Counting)
 - `cmd/archive/` - CLI interface
+
+### Range Scanning
+
+**Scan Operations** provide ordered iteration over key ranges:
+- **Snapshot Isolation**: Scans see consistent data as of scan start time
+- **Reference Counting**: Memtables cannot be dropped while scans are active
+- **Compound Iterator**: Merges multiple sources (memtables + SSTables) with MVCC semantics
+- **Filtering**: XOR filters skip SSTables that don't contain scan range keys
+
+### Known Critical Issues (Fixed)
+
+- **Flush-During-Scan Race**: Fixed memtable reference counting to prevent "collection does not exist" errors when flushes occur during active scans
+- **Thread Safety**: Fixed double-check locking in memtable handle registry
+
+### Testing Strategy
+
+- **Unit Tests**: Fast tests with mock cursors (`pkg/memtable/iterator_test.go`)
+- **Integration Tests**: Real MongoDB testing with `BLOBBY_TEST_MONGO=1`
+- **Chaos Testing**: Concurrent operations with simulated failures
+- **Range Scan Tests**: Comprehensive edge cases and boundary conditions
+
+## Development Guidelines
+
+### Code Style
+- Use early return patterns instead of nested conditionals
+- Remove comments that just describe what code does
+- Prefer descriptive variable names over abbreviations
+- Keep mock/test utilities in separate files or testutil packages
+
+### Testing
+- Always test real implementations, not just fakes
+- Document complex bugs with extensive context
+- Use chaos testing for race condition detection
+- Maintain consistent whitespace in test files
+
+### Architecture
+- Keep package-specific iterators in their own packages
+- Use `pkg/iterator` for generic iterator utilities only
+- Abstract away implementation details in mock objects
+- Expose minimal, clean APIs (e.g., `CanDrop()` vs `RefCount()`)
