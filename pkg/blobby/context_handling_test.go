@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRangeScanContextPropagation(t *testing.T) {
+func TestScanContextPropagation(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -39,7 +39,7 @@ func TestRangeScanContextPropagation(t *testing.T) {
 	scanCtx, cancel := context.WithCancel(ctx)
 
 	// start scan
-	iter, _, err := b.RangeScan(scanCtx, "", "")
+	iter, _, err := b.Scan(scanCtx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -68,7 +68,7 @@ func TestRangeScanContextPropagation(t *testing.T) {
 	require.Equal(t, context.Canceled, iter.Err())
 }
 
-func TestRangeScanContextTimeout(t *testing.T) {
+func TestScanContextTimeout(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -85,7 +85,7 @@ func TestRangeScanContextTimeout(t *testing.T) {
 	defer cancel()
 
 	// this should either fail immediately or succeed and then fail on iteration
-	iter, _, err := b.RangeScan(timeoutCtx, "", "")
+	iter, _, err := b.Scan(timeoutCtx, "", "")
 	if err != nil {
 		// timeout during scan setup - error might be wrapped
 		require.Contains(t, err.Error(), "context deadline exceeded")
@@ -103,7 +103,7 @@ func TestRangeScanContextTimeout(t *testing.T) {
 	require.Contains(t, iter.Err().Error(), "context deadline exceeded")
 }
 
-func TestRangeScanWithDeadlineExceeded(t *testing.T) {
+func TestScanWithDeadlineExceeded(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -116,7 +116,7 @@ func TestRangeScanWithDeadlineExceeded(t *testing.T) {
 	}
 
 	// start scan with good context
-	iter, _, err := b.RangeScan(ctx, "", "")
+	iter, _, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 

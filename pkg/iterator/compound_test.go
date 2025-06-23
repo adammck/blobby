@@ -111,7 +111,7 @@ func TestCompoundWithEmptyIterators(t *testing.T) {
 		&mockIter{records: nil},
 	}
 
-	compound := New(ctx, iters, []string{"empty1", "valid", "empty2"})
+	compound := New(ctx, iters)
 	defer compound.Close()
 
 	require.True(t, compound.Next(ctx))
@@ -137,7 +137,7 @@ func TestCompoundDuplicateHandling(t *testing.T) {
 		}},
 	}
 
-	compound := New(ctx, iters, []string{"iter1", "iter2"})
+	compound := New(ctx, iters)
 	defer compound.Close()
 
 	res := make(map[string][]byte)
@@ -167,7 +167,7 @@ func TestCompoundTombstoneHandling(t *testing.T) {
 		}},
 	}
 
-	compound := New(ctx, iters, []string{"iter1", "iter2"})
+	compound := New(ctx, iters)
 	defer compound.Close()
 
 	res := make(map[string][]byte)
@@ -195,7 +195,7 @@ func TestCompoundKeyOrdering(t *testing.T) {
 		}},
 	}
 
-	compound := New(ctx, iters, []string{"iter1", "iter2"})
+	compound := New(ctx, iters)
 	defer compound.Close()
 
 	var keys []string
@@ -218,7 +218,7 @@ func TestCompoundContextCancellation(t *testing.T) {
 		}},
 	}
 
-	compound := New(ctx, iters, []string{"iter1"})
+	compound := New(ctx, iters)
 	defer compound.Close()
 
 	require.True(t, compound.Next(ctx))
@@ -243,7 +243,7 @@ func TestCompoundCloseResourceCleanup(t *testing.T) {
 	}}
 
 	iters := []api.Iterator{mock1, mock2}
-	compound := New(ctx, iters, []string{"iter1", "iter2"})
+	compound := New(ctx, iters)
 
 	require.True(t, compound.Next(ctx))
 
@@ -268,7 +268,7 @@ func TestCompoundEmptyHeap(t *testing.T) {
 		}},
 	}
 
-	compound := New(ctx, iters, []string{"iter1"})
+	compound := New(ctx, iters)
 	defer compound.Close()
 
 	require.True(t, compound.Next(ctx))
@@ -289,7 +289,7 @@ func TestCompoundTimestamp(t *testing.T) {
 		}},
 	}
 
-	compound := New(ctx, iters, []string{"iter1"})
+	compound := New(ctx, iters)
 	defer compound.Close()
 
 	require.True(t, compound.Next(ctx))

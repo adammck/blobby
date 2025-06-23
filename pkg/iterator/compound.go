@@ -29,7 +29,6 @@ type iterState struct {
 	key       string
 	value     []byte
 	timestamp time.Time
-	source    string
 	valid     bool
 }
 
@@ -64,17 +63,15 @@ func (h *iterHeap) Pop() any {
 }
 
 // New creates a compound iterator that merges multiple iterators.
-// The sources slice provides debugging information about each iterator.
-func New(ctx context.Context, iters []api.Iterator, sources []string) *Compound {
+func New(ctx context.Context, iters []api.Iterator) *Compound {
 	c := &Compound{
 		heap:      &iterHeap{},
 		iterators: slices.Clone(iters),
 	}
 
-	for i, iter := range iters {
+	for _, iter := range iters {
 		s := &iterState{
-			iter:   iter,
-			source: sources[i],
+			iter: iter,
 		}
 
 		if ok, err := advanceIterState(ctx, s); err != nil {

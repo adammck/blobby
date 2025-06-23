@@ -204,9 +204,9 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 		defer r.Close()
 
 		var scanned int
-		rec, scanned, err = b.Scan(ctx, r, key)
+		rec, scanned, err = b.ScanSSTable(ctx, r, key)
 		if err != nil {
-			return nil, stats, fmt.Errorf("Blobby.Scan: %w", err)
+			return nil, stats, fmt.Errorf("Blobby.ScanSSTable: %w", err)
 		}
 
 		// accumulate stats as we go
@@ -279,10 +279,10 @@ func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error
 	return f, nil
 }
 
-// Scan reads from the given sstable reader until it finds a record with the
+// ScanSSTable reads from the given sstable reader until it finds a record with the
 // given key. If EOF is reached, nil is returned. For efficiency, the reader
 // should already be *near* the record by using an index.
-func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (*types.Record, int, error) {
+func (b *Blobby) ScanSSTable(ctx context.Context, reader *sstable.Reader, key string) (*types.Record, int, error) {
 	var rec *types.Record
 	var scanned int
 	var err error
@@ -307,10 +307,10 @@ func (b *Blobby) Scan(ctx context.Context, reader *sstable.Reader, key string) (
 	return rec, scanned, nil
 }
 
-// RangeScan returns an iterator for all keys in the range [start, end).
+// Scan returns an iterator for all keys in the range [start, end).
 // If end is empty, the scan is unbounded (all keys >= start).
 // The returned iterator must be closed to avoid resource leaks.
-func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator, *api.ScanStats, error) {
+func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *api.ScanStats, error) {
 	stats := &api.ScanStats{}
 
 	// validate range
@@ -319,7 +319,6 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 	}
 
 	var iterators []api.Iterator
-	var sources []string
 	var handles []*memtable.Handle
 	var needsCleanup = true
 
@@ -373,7 +372,6 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 		}
 
 		iterators = append(iterators, refIter)
-		sources = append(sources, "memtable:"+name)
 		stats.MemtablesRead++
 	}
 
@@ -401,13 +399,11 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 
 		iter := sstable.NewRangeIterator(reader, start, end)
 		iterators = append(iterators, iter)
-		sources = append(sources, "sstable:"+meta.Filename())
-		stats.BlobsFetched++
 		stats.SstablesRead++
 	}
 
 	// create compound iterator
-	compound := iterator.New(ctx, iterators, sources)
+	compound := iterator.New(ctx, iterators)
 
 	// transfer ownership to compound iterator
 	needsCleanup = false
@@ -421,6 +417,16 @@ func (b *Blobby) RangeScan(ctx context.Context, start, end string) (api.Iterator
 
 // refCountingIterator wraps a memtable iterator and manages reference counting
 // to prevent memtables from being dropped while scans are active.
+//
+// This is needed because:
+// 1. Memtables can be dropped during compaction when their reference count reaches zero
+// 2. Long-running scans need to ensure the underlying collection doesn't get deleted
+// 3. Handle.AddRef()/Release() provides the reference counting, but we need to tie
+//    iterator lifecycle to handle lifecycle 
+// 4. When the iterator is closed, we Release() the handle to allow cleanup
+//
+// Without this wrapper, a memtable could be dropped mid-scan, causing the 
+// iterator to fail with "collection does not exist" errors.
 type refCountingIterator struct {
 	api.Iterator
 	handle *memtable.Handle
@@ -523,40 +529,3 @@ func (b *Blobby) Compact(ctx context.Context, opts api.CompactionOptions) ([]*ap
 	return b.comp.Run(ctx, opts)
 }
 
-// ScanPrefix returns an iterator for all keys with the given prefix.
-// If prefix is empty, all keys are returned.
-// The returned iterator must be closed to avoid resource leaks.
-func (b *Blobby) ScanPrefix(ctx context.Context, prefix string) (api.Iterator, *api.ScanStats, error) {
-	if prefix == "" {
-		return b.RangeScan(ctx, "", "")
-	}
-
-	// Calculate the next possible prefix by incrementing the last byte
-	// This handles UTF-8 properly by working at the byte level
-	end := incrementPrefix(prefix)
-	return b.RangeScan(ctx, prefix, end)
-}
-
-// incrementPrefix calculates the next lexicographic string after the given prefix
-// for use in range scans. It handles UTF-8 properly by incrementing bytes.
-func incrementPrefix(prefix string) string {
-	if prefix == "" {
-		return ""
-	}
-
-	// Convert to bytes for manipulation
-	bytes := []byte(prefix)
-
-	// Find the last byte that can be incremented
-	for i := len(bytes) - 1; i >= 0; i-- {
-		if bytes[i] < 0xff {
-			bytes[i]++
-			// Truncate any trailing bytes that were 0xff
-			return string(bytes[:i+1])
-		}
-	}
-
-	// All bytes were 0xff, so there's no valid upper bound
-	// Return empty string to indicate unbounded scan
-	return ""
-}

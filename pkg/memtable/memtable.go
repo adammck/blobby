@@ -39,7 +39,9 @@ type Memtable struct {
 	mongo    *mongo.Database
 	clock    clockwork.Clock
 
-	// handle registry for singleton handles
+	// Handle registry ensures one handle per memtable collection
+	// This is critical for reference counting to work correctly across
+	// concurrent operations (scans, flushes, compactions)
 	handlesMu sync.RWMutex
 	handles   map[string]*Handle
 }
@@ -392,8 +394,11 @@ func (mt *Memtable) ListMemtables(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
-// GetHandle returns a handle for the specified memtable
+// GetHandle returns a singleton handle for the specified memtable.
+// The same handle is returned for multiple calls with the same name.
+// This ensures reference counting works correctly across concurrent operations.
 func (mt *Memtable) GetHandle(ctx context.Context, name string) (*Handle, error) {
+	// Fast path: check if handle exists with read lock
 	mt.handlesMu.RLock()
 	if handle, exists := mt.handles[name]; exists {
 		mt.handlesMu.RUnlock()
@@ -401,10 +406,14 @@ func (mt *Memtable) GetHandle(ctx context.Context, name string) (*Handle, error)
 	}
 	mt.handlesMu.RUnlock()
 
+	// Slow path: create handle with write lock and double-check
 	mt.handlesMu.Lock()
 	defer mt.handlesMu.Unlock()
-
-	// double-check after acquiring write lock
+	
+	// Double-check after acquiring write lock to handle race conditions:
+	// Two goroutines could pass the read lock check above, then compete
+	// for the write lock. The second one should use the handle created
+	// by the first one rather than creating a duplicate.
 	if handle, exists := mt.handles[name]; exists {
 		return handle, nil
 	}

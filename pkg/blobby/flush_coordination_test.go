@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFlushCoordinationWithRangeScan(t *testing.T) {
+func TestFlushCoordinationWithScan(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -25,7 +25,7 @@ func TestFlushCoordinationWithRangeScan(t *testing.T) {
 	}
 
 	// start a range scan
-	iter, _, err := b.RangeScan(ctx, "", "")
+	iter, _, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 
 	// verify we can read the first record
@@ -78,7 +78,7 @@ func TestMemtableReferenceCountingDuringScans(t *testing.T) {
 	var err error
 
 	for i := 0; i < numScans; i++ {
-		iters[i], _, err = b.RangeScan(ctx, "", "")
+		iters[i], _, err = b.Scan(ctx, "", "")
 		require.NoError(t, err)
 	}
 
@@ -123,7 +123,7 @@ func TestMemtableReferenceCountingPreventsDeletion(t *testing.T) {
 	originalMemtable := memtables[0]
 
 	// start scan which should add reference to memtable
-	iter, _, err := b.RangeScan(ctx, "", "")
+	iter, _, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 
 	// read first record
@@ -162,7 +162,7 @@ func TestMemtableReferenceCountingPreventsDeletion(t *testing.T) {
 	require.True(t, canDrop)
 }
 
-func TestPanicRecoveryInRangeScan(t *testing.T) {
+func TestPanicRecoveryInScan(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -176,7 +176,7 @@ func TestPanicRecoveryInRangeScan(t *testing.T) {
 	cancelCtx, cancel := context.WithCancel(ctx)
 
 	// start scan
-	iter, _, err := b.RangeScan(cancelCtx, "", "")
+	iter, _, err := b.Scan(cancelCtx, "", "")
 	require.NoError(t, err)
 
 	// cancel context to potentially trigger cleanup
@@ -193,6 +193,6 @@ func TestPanicRecoveryInRangeScan(t *testing.T) {
 	}
 
 	// verify we can still use blobby normally after potential panic
-	_, _, err = b.RangeScan(ctx, "", "")
+	_, _, err = b.Scan(ctx, "", "")
 	require.NoError(t, err)
 }

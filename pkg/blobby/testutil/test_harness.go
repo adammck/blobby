@@ -52,8 +52,8 @@ func (s *Harness) Compact() Op {
 	return CompactOp{h: s}
 }
 
-func (s *Harness) RangeScan(start, end string) Op {
-	return RangeScanOp{h: s, start: start, end: end}
+func (s *Harness) Scan(start, end string) Op {
+	return ScanOp{h: s, start: start, end: end}
 }
 
 func (h *Harness) Verify(ctx context.Context, t *testing.T) {
@@ -269,26 +269,26 @@ func (o CompactOp) Run(t *testing.T, ctx context.Context) error {
 	return nil
 }
 
-type RangeScanOp struct {
+type ScanOp struct {
 	h     *Harness
 	start string
 	end   string
 }
 
-func (o RangeScanOp) String() string {
-	return fmt.Sprintf("range_scan [%q, %q)", o.start, o.end)
+func (o ScanOp) String() string {
+	return fmt.Sprintf("scan [%q, %q)", o.start, o.end)
 }
 
-func (o RangeScanOp) Run(t *testing.T, ctx context.Context) error {
-	iter, _, err := o.h.sut.RangeScan(ctx, o.start, o.end)
+func (o ScanOp) Run(t *testing.T, ctx context.Context) error {
+	iter, _, err := o.h.sut.Scan(ctx, o.start, o.end)
 	if err != nil {
-		return fmt.Errorf("sut.RangeScan: %w", err)
+		return fmt.Errorf("sut.Scan: %w", err)
 	}
 	defer iter.Close()
 
-	modelIter, _, err := o.h.model.RangeScan(ctx, o.start, o.end)
+	modelIter, _, err := o.h.model.Scan(ctx, o.start, o.end)
 	if err != nil {
-		return fmt.Errorf("model.RangeScan: %w", err)
+		return fmt.Errorf("model.Scan: %w", err)
 	}
 	defer modelIter.Close()
 
@@ -329,7 +329,7 @@ func (o RangeScanOp) Run(t *testing.T, ctx context.Context) error {
 		return fmt.Errorf("model iterator error: %w", modelIter.Err())
 	}
 
-	t.Logf("RangeScan [%q, %q) -> %d keys", o.start, o.end, count)
+	t.Logf("Scan [%q, %q) -> %d keys", o.start, o.end, count)
 
 	return nil
 }

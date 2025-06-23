@@ -91,7 +91,7 @@ func TestRangeIterator_MultipleRecords(t *testing.T) {
 	require.NoError(t, iter.Err())
 }
 
-func TestRangeIterator_RangeScanBasic(t *testing.T) {
+func TestRangeIterator_ScanBasic(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
@@ -119,7 +119,7 @@ func TestRangeIterator_RangeScanBasic(t *testing.T) {
 	require.NoError(t, iter.Err())
 }
 
-func TestRangeIterator_RangeScanStartOnly(t *testing.T) {
+func TestRangeIterator_ScanStartOnly(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
@@ -144,7 +144,7 @@ func TestRangeIterator_RangeScanStartOnly(t *testing.T) {
 	require.NoError(t, iter.Err())
 }
 
-func TestRangeIterator_RangeScanEndOnly(t *testing.T) {
+func TestRangeIterator_ScanEndOnly(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 

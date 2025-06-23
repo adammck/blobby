@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/adammck/blobby/pkg/blobby/testutil"
+	"github.com/adammck/blobby/pkg/util"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 )
@@ -30,8 +31,9 @@ func TestScanPrefix(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// test prefix scan for users
-	iter, stats, err := fake.ScanPrefix(ctx, "users:")
+	// test prefix scan for users using util.IncrementPrefix
+	end := util.IncrementPrefix("users:")
+	iter, stats, err := fake.Scan(ctx, "users:", end)
 	require.NoError(t, err)
 	require.NotNil(t, stats)
 	defer iter.Close()
@@ -50,8 +52,9 @@ func TestScanPrefix(t *testing.T) {
 	require.Equal(t, expected, userResults)
 	require.Equal(t, 3, stats.RecordsReturned)
 
-	// test prefix scan for items
-	iter, stats, err = fake.ScanPrefix(ctx, "items:")
+	// test prefix scan for items using util.IncrementPrefix
+	end = util.IncrementPrefix("items:")
+	iter, stats, err = fake.Scan(ctx, "items:", end)
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -68,8 +71,9 @@ func TestScanPrefix(t *testing.T) {
 	require.Equal(t, expected, itemResults)
 	require.Equal(t, 2, stats.RecordsReturned)
 
-	// test prefix scan for config
-	iter, stats, err = fake.ScanPrefix(ctx, "config:")
+	// test prefix scan for config using util.IncrementPrefix
+	end = util.IncrementPrefix("config:")
+	iter, stats, err = fake.Scan(ctx, "config:", end)
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -86,8 +90,9 @@ func TestScanPrefix(t *testing.T) {
 	require.Equal(t, expected, configResults)
 	require.Equal(t, 2, stats.RecordsReturned)
 
-	// test non-existent prefix
-	iter, stats, err = fake.ScanPrefix(ctx, "nonexistent:")
+	// test non-existent prefix using util.IncrementPrefix
+	end = util.IncrementPrefix("nonexistent:")
+	iter, stats, err = fake.Scan(ctx, "nonexistent:", end)
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -128,8 +133,9 @@ func TestScanPrefixRealBlobby(t *testing.T) {
 	_, err = b.Put(ctx, "items:shield", []byte("shield data"))
 	require.NoError(t, err)
 
-	// test prefix scan across sources
-	iter, stats, err := b.ScanPrefix(ctx, "users:")
+	// test prefix scan across sources using util.IncrementPrefix
+	end := util.IncrementPrefix("users:")
+	iter, stats, err := b.Scan(ctx, "users:", end)
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -178,8 +184,9 @@ func TestScanPrefixWithTombstones(t *testing.T) {
 	_, err = b.Put(ctx, "users:charlie", []byte("charlie data"))
 	require.NoError(t, err)
 
-	// scan should skip deleted user
-	iter, stats, err := b.ScanPrefix(ctx, "users:")
+	// scan should skip deleted user using util.IncrementPrefix
+	end := util.IncrementPrefix("users:")
+	iter, stats, err := b.Scan(ctx, "users:", end)
 	require.NoError(t, err)
 	defer iter.Close()
 

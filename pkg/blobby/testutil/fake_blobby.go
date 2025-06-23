@@ -57,7 +57,7 @@ func (m *FakeBlobby) Delete(ctx context.Context, key string) (*api.DeleteStats, 
 	}, nil
 }
 
-func (m *FakeBlobby) RangeScan(ctx context.Context, start, end string) (api.Iterator, *api.ScanStats, error) {
+func (m *FakeBlobby) Scan(ctx context.Context, start, end string) (api.Iterator, *api.ScanStats, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -91,10 +91,6 @@ func (m *FakeBlobby) RangeScan(ctx context.Context, start, end string) (api.Iter
 	}, &api.ScanStats{RecordsReturned: len(keys)}, nil
 }
 
-func (m *FakeBlobby) ScanPrefix(ctx context.Context, prefix string) (api.Iterator, *api.ScanStats, error) {
-	end := prefix + "\xff"
-	return m.RangeScan(ctx, prefix, end)
-}
 
 // No-op but returns valid stats structure
 func (m *FakeBlobby) Flush(ctx context.Context) (*api.FlushStats, error) {

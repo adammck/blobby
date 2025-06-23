@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestRangeScanConsistency tests the specific race condition found in chaos testing
-func TestRangeScanConsistency(t *testing.T) {
+// TestScanConsistency tests the specific race condition found in chaos testing
+func TestScanConsistency(t *testing.T) {
 	ctx, _, b := setup(t, clockwork.NewRealClock())
 	th := testutil.NewHarness(b)
 
@@ -26,6 +26,6 @@ func TestRangeScanConsistency(t *testing.T) {
 	require.NoError(t, err)
 
 	// range scan should see the new value
-	err = th.RangeScan("key-0000", "key-0100").Run(t, ctx)
+	err = th.Scan("key-0000", "key-0100").Run(t, ctx)
 	require.NoError(t, err, "range scan should see the latest value after put")
 }

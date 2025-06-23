@@ -121,7 +121,7 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 
 		case p < cfg.pGet+cfg.pPut+cfg.pDelete+cfg.pScan:
 			start, end := selectRange(cfg, rnd)
-			op = th.RangeScan(start, end)
+			op = th.Scan(start, end)
 
 		case p < cfg.pGet+cfg.pPut+cfg.pDelete+cfg.pScan+cfg.pFlush:
 			op = th.Flush()

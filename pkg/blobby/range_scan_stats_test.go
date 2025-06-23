@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRangeScanStatsTracking(t *testing.T) {
+func TestScanStatsTracking(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -35,7 +35,7 @@ func TestRangeScanStatsTracking(t *testing.T) {
 	}
 
 	// perform range scan
-	iter, stats, err := b.RangeScan(ctx, "", "")
+	iter, stats, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -51,11 +51,11 @@ func TestRangeScanStatsTracking(t *testing.T) {
 	require.Equal(t, 10, stats.RecordsReturned)
 	require.Equal(t, 1, stats.MemtablesRead) // active memtable
 	require.Equal(t, 1, stats.SstablesRead)  // one sstable created from flush
-	require.Equal(t, 1, stats.BlobsFetched)  // one sstable blob fetched
+	// BlobsFetched was removed - SstablesRead covers this
 	require.Equal(t, 0, stats.BlobsSkipped)  // no blooms to skip
 }
 
-func TestRangeScanStatsWithMultipleSources(t *testing.T) {
+func TestScanStatsWithMultipleSources(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -94,7 +94,7 @@ func TestRangeScanStatsWithMultipleSources(t *testing.T) {
 	}
 
 	// perform range scan
-	iter, stats, err := b.RangeScan(ctx, "", "")
+	iter, stats, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -110,11 +110,11 @@ func TestRangeScanStatsWithMultipleSources(t *testing.T) {
 	require.Equal(t, 9, stats.RecordsReturned)
 	require.Equal(t, 1, stats.MemtablesRead) // active memtable
 	require.Equal(t, 2, stats.SstablesRead)  // two sstables
-	require.Equal(t, 2, stats.BlobsFetched)  // two sstable blobs fetched
+	// BlobsFetched was removed - SstablesRead covers this
 	require.Equal(t, 0, stats.BlobsSkipped)
 }
 
-func TestRangeScanStatsWithLimitedRange(t *testing.T) {
+func TestScanStatsWithLimitedRange(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -132,7 +132,7 @@ func TestRangeScanStatsWithLimitedRange(t *testing.T) {
 	require.NoError(t, err)
 
 	// scan limited range
-	iter, stats, err := b.RangeScan(ctx, "banana", "date")
+	iter, stats, err := b.Scan(ctx, "banana", "date")
 	require.NoError(t, err)
 	defer iter.Close()
 

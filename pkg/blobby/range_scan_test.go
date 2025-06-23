@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRangeScanBasic(t *testing.T) {
+func TestScanBasic(t *testing.T) {
 	ctx := context.Background()
 	fake := testutil.NewFakeBlobby()
 
@@ -29,7 +29,7 @@ func TestRangeScanBasic(t *testing.T) {
 	require.NoError(t, err)
 
 	// test range scan
-	iter, stats, err := fake.RangeScan(ctx, "b", "d")
+	iter, stats, err := fake.Scan(ctx, "b", "d")
 	require.NoError(t, err)
 	require.NotNil(t, iter)
 	require.NotNil(t, stats)
@@ -49,12 +49,12 @@ func TestRangeScanBasic(t *testing.T) {
 	require.NoError(t, iter.Err())
 }
 
-func TestRangeScanEmpty(t *testing.T) {
+func TestScanEmpty(t *testing.T) {
 	ctx := context.Background()
 	fake := testutil.NewFakeBlobby()
 
 	// test empty range
-	iter, stats, err := fake.RangeScan(ctx, "x", "z")
+	iter, stats, err := fake.Scan(ctx, "x", "z")
 	require.NoError(t, err)
 	require.NotNil(t, iter)
 	require.NotNil(t, stats)
@@ -65,7 +65,7 @@ func TestRangeScanEmpty(t *testing.T) {
 	require.NoError(t, iter.Err())
 }
 
-func TestRangeScanAllKeys(t *testing.T) {
+func TestScanAllKeys(t *testing.T) {
 	ctx := context.Background()
 	fake := testutil.NewFakeBlobby()
 
@@ -77,7 +77,7 @@ func TestRangeScanAllKeys(t *testing.T) {
 	require.NoError(t, err)
 
 	// test scanning all keys (empty start and end)
-	iter, stats, err := fake.RangeScan(ctx, "", "")
+	iter, stats, err := fake.Scan(ctx, "", "")
 	require.NoError(t, err)
 	require.NotNil(t, iter)
 	require.NotNil(t, stats)
@@ -93,7 +93,7 @@ func TestRangeScanAllKeys(t *testing.T) {
 	require.Equal(t, 2, count)
 }
 
-func TestRangeScanWithTombstones(t *testing.T) {
+func TestScanWithTombstones(t *testing.T) {
 	ctx := context.Background()
 	fake := testutil.NewFakeBlobby()
 
@@ -108,7 +108,7 @@ func TestRangeScanWithTombstones(t *testing.T) {
 	require.NoError(t, err)
 
 	// scan should only return key2
-	iter, _, err := fake.RangeScan(ctx, "", "")
+	iter, _, err := fake.Scan(ctx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -120,8 +120,8 @@ func TestRangeScanWithTombstones(t *testing.T) {
 	require.NoError(t, iter.Err())
 }
 
-// TestRangeScanHeapOrdering tests the critical heap ordering logic
-func TestRangeScanHeapOrdering(t *testing.T) {
+// TestScanHeapOrdering tests the critical heap ordering logic
+func TestScanHeapOrdering(t *testing.T) {
 	ctx, _, b := setup(t, clockwork.NewRealClock())
 
 	// create data across multiple sources with same keys but different timestamps
@@ -144,7 +144,7 @@ func TestRangeScanHeapOrdering(t *testing.T) {
 	require.NoError(t, err)
 
 	// range scan should return newest versions only
-	iter, _, err := b.RangeScan(ctx, "", "")
+	iter, _, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -162,8 +162,8 @@ func TestRangeScanHeapOrdering(t *testing.T) {
 	}, results)
 }
 
-// TestRangeScanMultipleVersions tests version handling across memtables and sstables
-func TestRangeScanMultipleVersions(t *testing.T) {
+// TestScanMultipleVersions tests version handling across memtables and sstables
+func TestScanMultipleVersions(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -193,7 +193,7 @@ func TestRangeScanMultipleVersions(t *testing.T) {
 	require.NoError(t, err)
 
 	// scan should return only the newest version
-	iter, _, err := b.RangeScan(ctx, "", "")
+	iter, _, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -205,8 +205,8 @@ func TestRangeScanMultipleVersions(t *testing.T) {
 	require.NoError(t, iter.Err())
 }
 
-// TestRangeScanTombstoneHandling tests complex tombstone scenarios
-func TestRangeScanTombstoneHandling(t *testing.T) {
+// TestScanTombstoneHandling tests complex tombstone scenarios
+func TestScanTombstoneHandling(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -234,7 +234,7 @@ func TestRangeScanTombstoneHandling(t *testing.T) {
 	require.NoError(t, err)
 
 	// scan should skip key1 (tombstone) but return key2 and key3
-	iter, _, err := b.RangeScan(ctx, "", "")
+	iter, _, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -250,8 +250,8 @@ func TestRangeScanTombstoneHandling(t *testing.T) {
 	}, results)
 }
 
-// TestRangeScanTombstoneOverridesOlderVersion ensures tombstones hide older versions
-func TestRangeScanTombstoneOverridesOlderVersion(t *testing.T) {
+// TestScanTombstoneOverridesOlderVersion ensures tombstones hide older versions
+func TestScanTombstoneOverridesOlderVersion(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -271,7 +271,7 @@ func TestRangeScanTombstoneOverridesOlderVersion(t *testing.T) {
 	require.NoError(t, err)
 
 	// scan should find no records
-	iter, _, err := b.RangeScan(ctx, "", "")
+	iter, _, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -279,8 +279,8 @@ func TestRangeScanTombstoneOverridesOlderVersion(t *testing.T) {
 	require.NoError(t, iter.Err())
 }
 
-// TestRangeScanBoundaryConditions tests edge cases around range boundaries
-func TestRangeScanBoundaryConditions(t *testing.T) {
+// TestScanBoundaryConditions tests edge cases around range boundaries
+func TestScanBoundaryConditions(t *testing.T) {
 	ctx := context.Background()
 	fake := testutil.NewFakeBlobby()
 
@@ -310,7 +310,7 @@ func TestRangeScanBoundaryConditions(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			iter, _, err := fake.RangeScan(ctx, tc.start, tc.end)
+			iter, _, err := fake.Scan(ctx, tc.start, tc.end)
 			require.NoError(t, err)
 			defer iter.Close()
 
@@ -324,8 +324,8 @@ func TestRangeScanBoundaryConditions(t *testing.T) {
 	}
 }
 
-// TestRangeScanUnicodeHandling tests unicode key handling
-func TestRangeScanUnicodeHandling(t *testing.T) {
+// TestScanUnicodeHandling tests unicode key handling
+func TestScanUnicodeHandling(t *testing.T) {
 	ctx := context.Background()
 	fake := testutil.NewFakeBlobby()
 
@@ -337,7 +337,7 @@ func TestRangeScanUnicodeHandling(t *testing.T) {
 	}
 
 	// test range that includes unicode
-	iter, _, err := fake.RangeScan(ctx, "café", "日本語")
+	iter, _, err := fake.Scan(ctx, "café", "日本語")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -352,22 +352,22 @@ func TestRangeScanUnicodeHandling(t *testing.T) {
 	require.Equal(t, expected, results)
 }
 
-// TestRangeScanInvalidRange tests invalid range validation
-func TestRangeScanInvalidRange(t *testing.T) {
+// TestScanInvalidRange tests invalid range validation
+func TestScanInvalidRange(t *testing.T) {
 	ctx, _, b := setup(t, clockwork.NewRealClock())
 
 	// start > end should fail
-	_, _, err := b.RangeScan(ctx, "z", "a")
+	_, _, err := b.Scan(ctx, "z", "a")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid range")
 
 	// empty end is allowed (means scan to end)
-	_, _, err = b.RangeScan(ctx, "a", "")
+	_, _, err = b.Scan(ctx, "a", "")
 	require.NoError(t, err)
 }
 
-// TestRangeScanContextCancellation tests context cancellation during iteration
-func TestRangeScanContextCancellation(t *testing.T) {
+// TestScanContextCancellation tests context cancellation during iteration
+func TestScanContextCancellation(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -380,7 +380,7 @@ func TestRangeScanContextCancellation(t *testing.T) {
 
 	// create scan with cancellable context
 	scanCtx, cancel := context.WithCancel(ctx)
-	iter, _, err := b.RangeScan(scanCtx, "", "")
+	iter, _, err := b.Scan(scanCtx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -399,12 +399,12 @@ func TestRangeScanContextCancellation(t *testing.T) {
 	require.Equal(t, context.Canceled, iter.Err())
 }
 
-// TestRangeScanResourceCleanup tests that iterators are properly cleaned up on errors
-func TestRangeScanResourceCleanup(t *testing.T) {
+// TestScanResourceCleanup tests that iterators are properly cleaned up on errors
+func TestScanResourceCleanup(t *testing.T) {
 	ctx, _, b := setup(t, clockwork.NewRealClock())
 
 	// create and close iterator normally
-	iter, _, err := b.RangeScan(ctx, "", "")
+	iter, _, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	err = iter.Close()
 	require.NoError(t, err)
@@ -420,8 +420,8 @@ func TestRangeScanResourceCleanup(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestRangeScanSnapshotIsolation tests that scans see consistent snapshot
-func TestRangeScanSnapshotIsolation(t *testing.T) {
+// TestScanSnapshotIsolation tests that scans see consistent snapshot
+func TestScanSnapshotIsolation(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -434,7 +434,7 @@ func TestRangeScanSnapshotIsolation(t *testing.T) {
 	require.NoError(t, err)
 
 	// start scan
-	iter, _, err := b.RangeScan(ctx, "", "")
+	iter, _, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -465,12 +465,12 @@ func TestRangeScanSnapshotIsolation(t *testing.T) {
 	require.Equal(t, expected, results)
 }
 
-// TestRangeScanEmptyIteratorHandling tests behavior with empty memtables/sstables
-func TestRangeScanEmptyIteratorHandling(t *testing.T) {
+// TestScanEmptyIteratorHandling tests behavior with empty memtables/sstables
+func TestScanEmptyIteratorHandling(t *testing.T) {
 	ctx, _, b := setup(t, clockwork.NewRealClock())
 
 	// scan on empty system
-	iter, stats, err := b.RangeScan(ctx, "", "")
+	iter, stats, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	require.NotNil(t, stats)
 	defer iter.Close()
@@ -482,14 +482,14 @@ func TestRangeScanEmptyIteratorHandling(t *testing.T) {
 	require.Equal(t, 0, stats.RecordsReturned)
 }
 
-// TestRangeScanSingleRecord tests edge case with exactly one matching record
-func TestRangeScanSingleRecord(t *testing.T) {
+// TestScanSingleRecord tests edge case with exactly one matching record
+func TestScanSingleRecord(t *testing.T) {
 	ctx, _, b := setup(t, clockwork.NewRealClock())
 
 	_, err := b.Put(ctx, "only", []byte("record"))
 	require.NoError(t, err)
 
-	iter, stats, err := b.RangeScan(ctx, "", "")
+	iter, stats, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -502,8 +502,8 @@ func TestRangeScanSingleRecord(t *testing.T) {
 	require.Equal(t, 1, stats.RecordsReturned)
 }
 
-// TestRangeScanKeyOrderingConsistency tests that keys are returned in consistent order
-func TestRangeScanKeyOrderingConsistency(t *testing.T) {
+// TestScanKeyOrderingConsistency tests that keys are returned in consistent order
+func TestScanKeyOrderingConsistency(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -530,7 +530,7 @@ func TestRangeScanKeyOrderingConsistency(t *testing.T) {
 	}
 
 	// scan should return in lexicographic order regardless of insertion order
-	iter, _, err := b.RangeScan(ctx, "", "")
+	iter, _, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -544,15 +544,15 @@ func TestRangeScanKeyOrderingConsistency(t *testing.T) {
 	require.Equal(t, expected, resultKeys)
 }
 
-// TestRangeScanIteratorStateAfterError tests iterator state after errors
-func TestRangeScanIteratorStateAfterError(t *testing.T) {
+// TestScanIteratorStateAfterError tests iterator state after errors
+func TestScanIteratorStateAfterError(t *testing.T) {
 	ctx, _, b := setup(t, clockwork.NewRealClock())
 
 	_, err := b.Put(ctx, "test", []byte("value"))
 	require.NoError(t, err)
 
 	// create iterator with valid context first
-	iter, _, err := b.RangeScan(ctx, "", "")
+	iter, _, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -571,8 +571,8 @@ func TestRangeScanIteratorStateAfterError(t *testing.T) {
 	require.Nil(t, iter.Value())
 }
 
-// TestRangeScanLargeRange tests behavior with large result sets
-func TestRangeScanLargeRange(t *testing.T) {
+// TestScanLargeRange tests behavior with large result sets
+func TestScanLargeRange(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -595,7 +595,7 @@ func TestRangeScanLargeRange(t *testing.T) {
 	}
 
 	// scan subset of range
-	iter, stats, err := b.RangeScan(ctx, "key-0100", "key-0200")
+	iter, stats, err := b.Scan(ctx, "key-0100", "key-0200")
 	require.NoError(t, err)
 	defer iter.Close()
 
@@ -616,8 +616,8 @@ func TestRangeScanLargeRange(t *testing.T) {
 	require.Equal(t, "key-0199", lastKey)
 }
 
-// TestRangeScanMemtableFlushDuringIteration tests edge case of flush during scan
-func TestRangeScanMemtableFlushDuringIteration(t *testing.T) {
+// TestScanMemtableFlushDuringIteration tests edge case of flush during scan
+func TestScanMemtableFlushDuringIteration(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)
 
@@ -630,7 +630,7 @@ func TestRangeScanMemtableFlushDuringIteration(t *testing.T) {
 	}
 
 	// start scan
-	iter, _, err := b.RangeScan(ctx, "", "")
+	iter, _, err := b.Scan(ctx, "", "")
 	require.NoError(t, err)
 	defer iter.Close()
 
