@@ -164,6 +164,29 @@ func TestMemtableIterator_WithTombstones(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// useMockCursors determines whether to use mock cursors or real MongoDB cursors in tests.
+//
+// WHY THIS EXISTS:
+// Most tests use mock cursors for speed and isolation, but we also need integration tests
+// that verify the memtable iterator works correctly with real MongoDB cursors. This flag
+// allows the same test suite to run in both modes.
+//
+// WHEN TO USE EACH MODE:
+// 
+// Mock Mode (default, BLOBBY_TEST_MONGO != "1"):
+// - Fast unit tests that don't require MongoDB
+// - Error injection testing (decode failures, cursor errors, etc.)
+// - Precise timestamp control for deterministic tests
+// - CI/CD environments where MongoDB might not be available
+//
+// Real MongoDB Mode (BLOBBY_TEST_MONGO = "1"):
+// - Integration testing with actual MongoDB driver cursors
+// - Verification that BSON serialization/deserialization works correctly
+// - Testing real MongoDB error conditions and edge cases
+// - Performance testing with realistic cursor overhead
+//
+// The mock implementation (simpleMockCursor) simulates MongoDB cursor behavior
+// but allows injection of errors and precise control over returned data.
 func useMockCursors() bool {
 	return os.Getenv("BLOBBY_TEST_MONGO") != "1"
 }

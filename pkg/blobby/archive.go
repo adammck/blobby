@@ -324,13 +324,14 @@ func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *ap
 
 	// cleanup function for error handling
 	cleanup := func() {
-		if needsCleanup {
-			for _, h := range handles {
-				h.Release()
-			}
-			for _, it := range iterators {
-				it.Close()
-			}
+		if !needsCleanup {
+			return
+		}
+		for _, h := range handles {
+			h.Release()
+		}
+		for _, it := range iterators {
+			it.Close()
 		}
 	}
 
@@ -402,13 +403,11 @@ func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *ap
 		stats.SstablesRead++
 	}
 
-	// create compound iterator
 	compound := iterator.New(ctx, iterators)
 
 	// transfer ownership to compound iterator
 	needsCleanup = false
 
-	// wrap in counting iterator to track RecordsReturned
 	counting := iterator.NewCounting(compound, stats)
 
 	return counting, stats, nil
@@ -514,13 +513,15 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 		return stats, fmt.Errorf("CanDropMemtable: %w", err)
 	}
 
-	if canDrop {
-		err = b.mt.Drop(ctx, hPrev.Name())
-		if err != nil {
-			return stats, fmt.Errorf("memtable.Drop: %w", err)
-		}
+	if !canDrop {
+		// TODO: if we can't drop it now, we should retry later when refs reach zero
+		return stats, nil
 	}
-	// TODO: if we can't drop it now, we should retry later when refs reach zero
+
+	err = b.mt.Drop(ctx, hPrev.Name())
+	if err != nil {
+		return stats, fmt.Errorf("memtable.Drop: %w", err)
+	}
 
 	return stats, nil
 }

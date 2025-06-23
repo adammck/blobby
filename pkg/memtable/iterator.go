@@ -7,6 +7,23 @@ import (
 	"github.com/adammck/blobby/pkg/types"
 )
 
+// cursor provides an abstraction over MongoDB cursors to enable testing.
+//
+// In production, this interface is implemented by *mongo.Cursor from the MongoDB driver.
+// In tests, this interface is implemented by mockCursor (see iterator_test.go) which
+// allows tests to run without requiring a real MongoDB instance.
+//
+// This abstraction is necessary because:
+// 1. Unit tests should be fast and not require external dependencies
+// 2. MongoDB cursors are difficult to mock due to their complex internal state
+// 3. We need to test error conditions that are hard to reproduce with real MongoDB
+// 4. The MongoDB driver's cursor interface is not exported, so we define our own
+//
+// The interface methods mirror the essential MongoDB cursor operations:
+// - Next() advances to the next document
+// - Err() returns any iteration errors  
+// - Decode() unmarshals the current document
+// - Close() releases cursor resources
 type cursor interface {
 	Next(ctx context.Context) bool
 	Err() error

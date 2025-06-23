@@ -95,7 +95,7 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 
 	t.Log("Creating initial dataset...")
 	for i := range cfg.initCount {
-		key := fmt.Sprintf("key-%04d", i)
+		key := generateKey(i)
 		val := fmt.Appendf(nil, "value-%04d-v1", i)
 		err := th.Put(key, val).Run(t, ctx)
 		require.NoError(t, err)
@@ -109,15 +109,17 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 
 		switch {
 		case p < cfg.pGet:
-			op = th.Get(selectKey(cfg, rnd))
+			key, _ := selectKey(cfg, rnd)
+			op = th.Get(key)
 
 		case p < cfg.pGet+cfg.pPut:
-			key := selectKey(cfg, rnd)
+			key, _ := selectKey(cfg, rnd)
 			val := fmt.Appendf(nil, "value-%s-v%05d-r%d", key, i, rnd.Int())
 			op = th.Put(key, val)
 
 		case p < cfg.pGet+cfg.pPut+cfg.pDelete:
-			op = th.Delete(selectKey(cfg, rnd))
+			key, _ := selectKey(cfg, rnd)
+			op = th.Delete(key)
 
 		case p < cfg.pGet+cfg.pPut+cfg.pDelete+cfg.pScan:
 			start, end := selectRange(cfg, rnd)
@@ -139,19 +141,27 @@ func runChaosTest(t *testing.T, ctx context.Context, b *Blobby, cfg chaosTestCon
 	th.LogStats(t)
 }
 
+// generateKey creates a key string from a number
+func generateKey(num int) string {
+	return fmt.Sprintf("key-%04d", num)
+}
+
 // selectKey selects a key based on the hot/warm/cold probabilities
-func selectKey(cfg chaosTestConfig, rng *rand.Rand) string {
+// Returns both the key string and its numeric value to avoid re-parsing
+func selectKey(cfg chaosTestConfig, rng *rand.Rand) (string, int) {
 	p := rng.Intn(cfg.pHot + cfg.pWarm + cfg.pCold)
+	var num int
 	switch {
 	case p < cfg.pHot:
-		return fmt.Sprintf("key-%04d", rng.Intn(cfg.nHot))
+		num = rng.Intn(cfg.nHot)
 
 	case p < cfg.pHot+cfg.pWarm:
-		return fmt.Sprintf("key-%04d", rng.Intn(cfg.nWarm)+cfg.nHot)
+		num = rng.Intn(cfg.nWarm) + cfg.nHot
 
 	default:
-		return fmt.Sprintf("key-%04d", rng.Intn(cfg.nCold)+cfg.nHot+cfg.nWarm)
+		num = rng.Intn(cfg.nCold) + cfg.nHot + cfg.nWarm
 	}
+	return generateKey(num), num
 }
 
 // selectRange generates a random range for range scans
@@ -161,21 +171,19 @@ func selectRange(cfg chaosTestConfig, rng *rand.Rand) (string, string) {
 
 	switch {
 	case rangeType < 30: // 30% - small range (1-5 keys)
-		start := selectKey(cfg, rng)
-		startNum := extractKeyNum(start)
+		start, startNum := selectKey(cfg, rng)
 		endNum := startNum + rng.Intn(5) + 1
-		end := fmt.Sprintf("key-%04d", endNum)
+		end := generateKey(endNum)
 		return start, end
 
 	case rangeType < 60: // 30% - medium range (5-20 keys)
-		start := selectKey(cfg, rng)
-		startNum := extractKeyNum(start)
+		start, startNum := selectKey(cfg, rng)
 		endNum := startNum + rng.Intn(20) + 5
-		end := fmt.Sprintf("key-%04d", endNum)
+		end := generateKey(endNum)
 		return start, end
 
 	case rangeType < 85: // 25% - large range (hot+warm keys)
-		return "key-0000", fmt.Sprintf("key-%04d", cfg.nHot+cfg.nWarm)
+		return generateKey(0), generateKey(cfg.nHot+cfg.nWarm)
 
 	case rangeType < 95: // 10% - prefix scan simulation
 		prefix := fmt.Sprintf("key-%01d", rng.Intn(10))
@@ -186,12 +194,6 @@ func selectRange(cfg chaosTestConfig, rng *rand.Rand) (string, string) {
 	}
 }
 
-// extractKeyNum extracts the numeric part from a key like "key-0042"
-func extractKeyNum(key string) int {
-	var num int
-	fmt.Sscanf(key, "key-%04d", &num)
-	return num
-}
 
 // getRand returns a random number generator seeded with the given seed, unless
 // the seed is 0, in which case it uses the current time.
