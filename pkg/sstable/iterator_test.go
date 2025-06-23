@@ -25,8 +25,7 @@ func TestRangeIterator_EmptySSTable(t *testing.T) {
 	require.Equal(t, "", iter.Key())
 	require.Nil(t, iter.Value())
 
-	timestampProvider := iter.(*rangeIterator)
-	require.True(t, timestampProvider.Timestamp().IsZero())
+	require.True(t, iter.Timestamp().IsZero())
 }
 
 func TestRangeIterator_SingleRecord(t *testing.T) {
@@ -46,9 +45,7 @@ func TestRangeIterator_SingleRecord(t *testing.T) {
 	require.Equal(t, "test-key", iter.Key())
 	require.Equal(t, []byte("test-doc"), iter.Value())
 
-	// cast to access Timestamp method
-	timestampProvider := iter.(*rangeIterator)
-	require.Equal(t, now, timestampProvider.Timestamp())
+	require.Equal(t, now, iter.Timestamp())
 
 	require.False(t, iter.Next(ctx))
 	require.NoError(t, iter.Err())

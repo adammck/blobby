@@ -53,7 +53,7 @@ func (c *simpleMockCursor) Decode(v interface{}) error {
 	src := c.records[c.pos]
 	*rec = src
 
-	// simulate real mongo behavior: tombstone records don't have document data
+	// simulate real cursor behavior: tombstone records don't have document data
 	if rec.Tombstone {
 		rec.Document = nil
 	}

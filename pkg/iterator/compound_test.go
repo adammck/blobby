@@ -100,7 +100,6 @@ func TestIteratorHeapOrdering(t *testing.T) {
 
 func TestCompoundWithEmptyIterators(t *testing.T) {
 	ctx := context.Background()
-
 	ts := time.Now().Truncate(time.Second)
 
 	iters := []api.Iterator{
