@@ -145,7 +145,7 @@ func (o PutOp) Run(t *testing.T, ctx context.Context) error {
 	}
 
 	o.h.keys[o.k] = struct{}{}
-	t.Logf("Put %s=%q -> %s", o.k, o.v, dest)
+	t.Logf("Put %s=%q -> %s", o.k, o.v, dest.Destination)
 
 	return nil
 }

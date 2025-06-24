@@ -73,30 +73,10 @@ type scanResources struct {
 // Close releases all resources, collecting any errors that occur.
 // This method is safe to call multiple times.
 func (sr *scanResources) Close() error {
-	var errs []error
-	
-	// Close all iterators (refCountingIterator will handle releasing its own handle)
-	for _, it := range sr.iterators {
-		if it != nil {
-			if err := it.Close(); err != nil {
-				errs = append(errs, err)
-			}
-		}
-	}
+	// Note: Iterators are closed by the compound iterator, so we don't need to close them here
+	// to avoid double-close. Handles are managed by their respective iterators (refCountingIterator).
 	sr.iterators = nil
-	
-	// Release any remaining handles not managed by iterators
-	for _, h := range sr.handles {
-		if h != nil {
-			h.Release()
-		}
-	}
 	sr.handles = nil
-	
-	// Return combined errors if any occurred
-	if len(errs) > 0 {
-		return fmt.Errorf("scan cleanup errors: %v", errs)
-	}
 	return nil
 }
 
@@ -116,10 +96,16 @@ type resourceManagedIterator struct {
 	api.Iterator
 	resources *scanResources
 	scanSem   *semaphore.Weighted // semaphore to release on close
+	closed    bool                // prevents double-close
 }
 
 // Close cleans up the underlying iterator and all associated resources
 func (rmi *resourceManagedIterator) Close() error {
+	if rmi.closed {
+		return nil // Already closed, safe to call multiple times
+	}
+	rmi.closed = true
+	
 	var errs []error
 	
 	// Close the wrapped iterator first
@@ -437,6 +423,7 @@ func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *ap
 
 		iter, err := b.mt.Scan(ctx, name, start, end)
 		if err != nil {
+			handle.Release() // Release reference if scan fails
 			return nil, stats, fmt.Errorf("memtable.Scan(%s): %w", name, err)
 		}
 
