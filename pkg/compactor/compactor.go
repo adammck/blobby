@@ -4,7 +4,6 @@ package compactor
 import (
 	"context"
 	"fmt"
-	"io"
 	"sort"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/adammck/blobby/pkg/types"
+	"github.com/adammck/blobby/pkg/util"
 	"github.com/jonboulle/clockwork"
 	"golang.org/x/sync/errgroup"
 )
@@ -254,22 +254,7 @@ func (c *Compactor) compactWithRollback(ctx context.Context, cc *Compaction, met
 
 // mergeWithoutGC performs simple merge without garbage collection
 func (c *Compactor) mergeWithoutGC(ctx context.Context, mr *sstable.MergeReader, ch chan<- *types.Record) error {
-	for {
-		rec, err := mr.Next()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return fmt.Errorf("MergeReader.Next: %w", err)
-		}
-		
-		select {
-		case ch <- rec:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	return nil
+	return util.SendRecords(ctx, mr, ch)
 }
 
 // mergeWithGC performs merge with garbage collection policy applied
@@ -277,25 +262,11 @@ func (c *Compactor) mergeWithGC(ctx context.Context, mr *sstable.MergeReader, ch
 	now := c.clock.Now()
 	versionCount := make(map[string]int)
 	
-	for {
-		rec, err := mr.Next()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return fmt.Errorf("MergeReader.Next: %w", err)
-		}
-		
-		// Apply GC policy to decide whether to keep this record
-		if c.shouldKeepRecord(rec, gcPolicy, now, versionCount) {
-			select {
-			case ch <- rec:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
+	filter := func(rec *types.Record) bool {
+		return c.shouldKeepRecord(rec, gcPolicy, now, versionCount)
 	}
-	return nil
+	
+	return util.SendFilteredRecords(ctx, mr, ch, filter)
 }
 
 // shouldKeepRecord determines if a record should be kept based on GC policy

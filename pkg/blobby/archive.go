@@ -17,11 +17,11 @@ import (
 	"github.com/adammck/blobby/pkg/lru"
 	"github.com/adammck/blobby/pkg/memtable"
 	"github.com/adammck/blobby/pkg/metadata"
+	sharedmongo "github.com/adammck/blobby/pkg/shared/mongo"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/adammck/blobby/pkg/types"
+	"github.com/adammck/blobby/pkg/util"
 	"github.com/jonboulle/clockwork"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -144,10 +144,11 @@ func (rmi *resourceManagedIterator) Close() error {
 }
 
 func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, sf sstable.Factory) *Blobby {
-	db, err := connectToMongo(ctx, mongoURL)
+	mongoClient := sharedmongo.NewClient(mongoURL)
+	db, err := mongoClient.GetDB(ctx)
 	if err != nil {
 		// TODO: return error, obviously
-		panic(fmt.Errorf("connectToMongo: %w", err))
+		panic(fmt.Errorf("getDB: %w", err))
 	}
 
 	ixs := mindexstore.New(db)
@@ -173,21 +174,6 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, sf
 	}
 }
 
-func connectToMongo(ctx context.Context, mongoURL string) (*mongo.Database, error) {
-	opt := options.Client().ApplyURI(mongoURL).SetTimeout(connectionTimeout)
-	client, err := mongo.Connect(ctx, opt)
-	if err != nil {
-		return nil, err
-	}
-
-	ctxPing, cancel := context.WithTimeout(ctx, pingTimeout)
-	defer cancel()
-	if err := client.Ping(ctxPing, nil); err != nil {
-		return nil, err
-	}
-
-	return client.Database(defaultDB), nil
-}
 
 func (b *Blobby) Ping(ctx context.Context) error {
 	err := b.mt.Ping(ctx)
@@ -402,28 +388,7 @@ func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error
 // given key. If EOF is reached, nil is returned. For efficiency, the reader
 // should already be *near* the record by using an index.
 func (b *Blobby) ScanSSTable(ctx context.Context, reader *sstable.Reader, key string) (*types.Record, int, error) {
-	var rec *types.Record
-	var scanned int
-	var err error
-
-	for {
-		rec, err = reader.Next()
-		if err != nil {
-			return nil, scanned, fmt.Errorf("sstable.Reader.Next: %w", err)
-		}
-		if rec == nil {
-			// end of file
-			return nil, scanned, nil
-		}
-
-		scanned++
-
-		if rec.Key == key {
-			break
-		}
-	}
-
-	return rec, scanned, nil
+	return util.FindRecord(reader, key)
 }
 
 // Scan returns an iterator for all keys in the range [start, end).

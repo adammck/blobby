@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
+	sharedmongo "github.com/adammck/blobby/pkg/shared/mongo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -19,36 +20,17 @@ const (
 )
 
 type Store struct {
-	mongo    *mongo.Database
-	mongoURL string
+	mongoClient *sharedmongo.Client
 }
 
 func New(mongoURL string) *Store {
 	return &Store{
-		mongoURL: mongoURL,
+		mongoClient: sharedmongo.NewClient(mongoURL).WithDirect(true),
 	}
 }
 
 func (s *Store) getMongo(ctx context.Context) (*mongo.Database, error) {
-	if s.mongo != nil {
-		return s.mongo, nil
-	}
-
-	// TODO: get rid of the SetDirect. that's just for tests. it belogns in the mongoURL.
-	opt := options.Client().ApplyURI(s.mongoURL).SetTimeout(connectionTimeout).SetDirect(true)
-	client, err := mongo.Connect(ctx, opt)
-	if err != nil {
-		return nil, err
-	}
-
-	ctxPing, cancel := context.WithTimeout(ctx, pingTimeout)
-	defer cancel()
-	if err := client.Ping(ctxPing, nil); err != nil {
-		return nil, err
-	}
-
-	s.mongo = client.Database(defaultDB)
-	return s.mongo, nil
+	return s.mongoClient.GetDB(ctx)
 }
 
 func (s *Store) Init(ctx context.Context) error {

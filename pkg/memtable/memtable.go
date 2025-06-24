@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
+	sharedmongo "github.com/adammck/blobby/pkg/shared/mongo"
 	"github.com/adammck/blobby/pkg/types"
 	"github.com/jonboulle/clockwork"
 	"go.mongodb.org/mongo-driver/bson"
@@ -51,9 +52,8 @@ type memtableInfo struct {
 }
 
 type Memtable struct {
-	mongoURL string
-	mongo    *mongo.Database
-	clock    clockwork.Clock
+	mongoClient *sharedmongo.Client
+	clock       clockwork.Clock
 
 	// Handle registry ensures one handle per memtable collection
 	// This is critical for reference counting to work correctly across
@@ -68,10 +68,10 @@ type Memtable struct {
 
 func New(mongoURL string, clock clockwork.Clock) *Memtable {
 	return &Memtable{
-		mongoURL: mongoURL,
-		clock:    clock,
-		handles:  make(map[string]*Handle),
-		maxSize:  defaultMaxMemtableSize,
+		mongoClient: sharedmongo.NewClient(mongoURL),
+		clock:       clock,
+		handles:     make(map[string]*Handle),
+		maxSize:     defaultMaxMemtableSize,
 	}
 }
 
@@ -260,32 +260,7 @@ func (mt *Memtable) Init(ctx context.Context) error {
 }
 
 func (mt *Memtable) GetMongo(ctx context.Context) (*mongo.Database, error) {
-	if mt.mongo != nil {
-		return mt.mongo, nil
-	}
-
-	m, err := connectToMongo(ctx, mt.mongoURL)
-	if err != nil {
-		return nil, err
-	}
-
-	mt.mongo = m
-	return m, nil
-}
-
-func connectToMongo(ctx context.Context, url string) (*mongo.Database, error) {
-	opt := options.Client().ApplyURI(url).SetTimeout(10 * time.Second)
-
-	client, err := mongo.Connect(ctx, opt)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := client.Ping(ctx, nil); err != nil {
-		return nil, err
-	}
-
-	return client.Database(defaultDB), nil
+	return mt.mongoClient.GetDB(ctx)
 }
 
 func (mt *Memtable) activeCollection(ctx context.Context) (*mongo.Collection, error) {
