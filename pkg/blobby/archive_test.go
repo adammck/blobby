@@ -19,7 +19,7 @@ func setup(t *testing.T, clock clockwork.Clock) (context.Context, *testdeps.Env,
 	ctx := context.Background()
 	env := testdeps.New(ctx, t, testdeps.WithMongo(), testdeps.WithMinio())
 
-	sf := sstable.NewFactory(sstable.WithIndexEveryNRecords(8), sstable.WithFilter("mod"))
+	sf := sstable.NewFactory(sstable.WithIndexEveryNRecords(8), sstable.WithFilter("xor"))
 	b := New(ctx, env.MongoURL(), env.S3Bucket, clock, sf)
 
 	err := b.Init(ctx)
@@ -330,16 +330,15 @@ func TestBasicWriteRead(t *testing.T) {
 	// sstables, and scan through the first to check that the key isn't present
 	// before moving onto the second one.
 	//
-	// we're using the 'mod' filter, which return false positives for keys with
-	// an even suffix (like this one), so we fetch both sstables. later we'll
-	// skip some.
+	// we're using the 'xor' filter, which is more accurate than mod filter,
+	// so it can skip sstables that don't contain the key.
 	val, gstats = tb.get("012")
 	require.Equal(t, val, docs["012"])
 	require.Equal(t, &api.GetStats{
 		Source:         t3.sstable,
-		BlobsFetched:   2, // <--
-		BlobsSkipped:   0,
-		RecordsScanned: 4,
+		BlobsFetched:   1, // <-- XOR filter allows skipping
+		BlobsSkipped:   1,
+		RecordsScanned: 2,
 	}, gstats)
 
 	// -------------------------------------- part three: simple compaction ----
