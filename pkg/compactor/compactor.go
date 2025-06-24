@@ -4,14 +4,15 @@ package compactor
 import (
 	"context"
 	"fmt"
-	"io"
 	"sort"
+	"time"
 
 	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/filter"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/adammck/blobby/pkg/types"
+	"github.com/adammck/blobby/pkg/util"
 	"github.com/jonboulle/clockwork"
 	"golang.org/x/sync/errgroup"
 )
@@ -48,14 +49,14 @@ func (c *Compactor) Run(ctx context.Context, opts api.CompactionOptions) ([]*api
 
 	stats := []*api.CompactionStats{}
 	for _, cc := range compactions {
-		s := c.Compact(ctx, cc)
+		s := c.Compact(ctx, cc, opts.GC)
 		stats = append(stats, s)
 	}
 
 	return stats, nil
 }
 
-func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.CompactionStats {
+func (c *Compactor) Compact(ctx context.Context, cc *Compaction, gcPolicy *api.GCPolicy) *api.CompactionStats {
 	stats := &api.CompactionStats{
 		Inputs: cc.Inputs,
 	}
@@ -71,10 +72,6 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 		readers[i] = r
 	}
 
-	// TODO: do filtering here, to expire data by timestamp and version count
-
-	// TODO: also do partitioning here, so large files can be split by key.
-
 	ch := make(chan *types.Record)
 	g, ctx2 := errgroup.WithContext(ctx)
 
@@ -86,18 +83,12 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 			return fmt.Errorf("NewMergeReader: %w", err)
 		}
 
-		for {
-			rec, err := mr.Next()
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				return fmt.Errorf("NewMergeReader: %w", err)
-			}
-			ch <- rec
+		// Apply GC policy if specified
+		if gcPolicy != nil {
+			return c.mergeWithGC(ctx2, mr, ch, gcPolicy)
+		} else {
+			return c.mergeWithoutGC(ctx2, mr, ch)
 		}
-
-		return nil
 	})
 
 	var meta *api.BlobMeta
@@ -122,65 +113,8 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 
 	stats.Outputs = []*api.BlobMeta{meta}
 
-	// TODO: Do the inserts and deletes transactionally!
-
-	err = c.md.Insert(ctx, meta)
-	if err != nil {
-		return &api.CompactionStats{
-			Error: fmt.Errorf("metadata.Insert: %w", err),
-		}
-	}
-
-	err = c.ixs.Put(ctx, meta.Filename(), idx)
-	if err != nil {
-		return &api.CompactionStats{
-			Error: fmt.Errorf("IndexStore.Put: %w", err),
-		}
-	}
-
-	// marshal the filter here. not sure why!
-	fi, err := f.Marshal()
-	if err != nil {
-		// TODO: roll back everything, or maybe do this above.
-		return &api.CompactionStats{
-			Error: fmt.Errorf("Filter.Marshal: %w", err),
-		}
-	}
-
-	// write the filter using a filterstore
-	err = c.fs.Put(ctx, meta.Filename(), fi)
-	if err != nil {
-		// TODO: roll back metadata insert
-		return &api.CompactionStats{
-			Error: fmt.Errorf("FilterStore.Put: %w", err),
-		}
-	}
-
-	// delete the input files from the metadata store, so they're no longer
-	// returned for queries, before removing the actual files.
-
-	for i, m := range cc.Inputs {
-		err = c.md.Delete(ctx, m)
-		if err != nil {
-			return &api.CompactionStats{
-				// TODO: include the metadata ID in this error.
-				Error: fmt.Errorf("metadata.Delete(%d): %w", i, err),
-			}
-		}
-	}
-
-	// delete the blobs.
-
-	for _, m := range cc.Inputs {
-		err := c.sstm.Delete(ctx, m.Filename())
-		if err != nil {
-			return &api.CompactionStats{
-				Error: fmt.Errorf("blobstore.Delete(%s): %w", m.Filename(), err),
-			}
-		}
-	}
-
-	return stats
+	// Use atomic compaction to ensure consistency
+	return c.compactWithRollback(ctx, cc, meta, idx, f)
 }
 
 type Compaction struct {
@@ -262,4 +196,98 @@ func (c *Compactor) GetCompactions(metas []*api.BlobMeta, opts api.CompactionOpt
 	}
 
 	return []*Compaction{r}
+}
+
+// compactWithRollback performs atomic compaction with rollback capability
+func (c *Compactor) compactWithRollback(ctx context.Context, cc *Compaction, meta *api.BlobMeta, idx []api.IndexEntry, f filter.Filter) *api.CompactionStats {
+	// Phase 1: Prepare all data (can be retried if fails)
+	fi, err := f.Marshal()
+	if err != nil {
+		return &api.CompactionStats{
+			Error: fmt.Errorf("Filter.Marshal: %w", err),
+		}
+	}
+
+	// Phase 2: Write index and filter (idempotent operations)
+	err = c.ixs.Put(ctx, meta.Filename(), idx)
+	if err != nil {
+		return &api.CompactionStats{
+			Error: fmt.Errorf("IndexStore.Put: %w", err),
+		}
+	}
+
+	err = c.fs.Put(ctx, meta.Filename(), fi)
+	if err != nil {
+		// Clean up index
+		c.ixs.Delete(ctx, meta.Filename()) // Best effort cleanup
+		return &api.CompactionStats{
+			Error: fmt.Errorf("FilterStore.Put: %w", err),
+		}
+	}
+
+	// Phase 3: Atomic metadata swap using MongoDB transaction
+	err = c.md.AtomicSwap(ctx, meta, cc.Inputs)
+	if err != nil {
+		// Rollback: clean up index and filter
+		c.ixs.Delete(ctx, meta.Filename()) // Best effort cleanup
+		c.fs.Delete(ctx, meta.Filename()) // Best effort cleanup
+		return &api.CompactionStats{
+			Error: fmt.Errorf("atomic metadata swap: %w", err),
+		}
+	}
+
+	// Phase 4: Clean up old blobs (safe to fail - metadata already updated)
+	for _, m := range cc.Inputs {
+		err := c.sstm.Delete(ctx, m.Filename())
+		if err != nil {
+			// Log error but don't fail compaction - metadata is already consistent
+			// In production, this should be logged for manual cleanup
+			fmt.Printf("Warning: failed to delete old blob %s: %v\n", m.Filename(), err)
+		}
+	}
+
+	return &api.CompactionStats{
+		Inputs:  cc.Inputs,
+		Outputs: []*api.BlobMeta{meta},
+	}
+}
+
+// mergeWithoutGC performs simple merge without garbage collection
+func (c *Compactor) mergeWithoutGC(ctx context.Context, mr *sstable.MergeReader, ch chan<- *types.Record) error {
+	return util.SendRecords(ctx, mr, ch)
+}
+
+// mergeWithGC performs merge with garbage collection policy applied
+func (c *Compactor) mergeWithGC(ctx context.Context, mr *sstable.MergeReader, ch chan<- *types.Record, gcPolicy *api.GCPolicy) error {
+	now := c.clock.Now()
+	versionCount := make(map[string]int)
+	
+	filter := func(rec *types.Record) bool {
+		return c.shouldKeepRecord(rec, gcPolicy, now, versionCount)
+	}
+	
+	return util.SendFilteredRecords(ctx, mr, ch, filter)
+}
+
+// shouldKeepRecord determines if a record should be kept based on GC policy
+func (c *Compactor) shouldKeepRecord(rec *types.Record, policy *api.GCPolicy, now time.Time, versionCount map[string]int) bool {
+	// Check age limits
+	if policy.MaxAge > 0 && now.Sub(rec.Timestamp) > policy.MaxAge {
+		return false
+	}
+	
+	// Check tombstone age limits
+	if rec.Tombstone && policy.TombstoneGCAge > 0 && now.Sub(rec.Timestamp) > policy.TombstoneGCAge {
+		return false
+	}
+	
+	// Check version limits
+	if policy.MaxVersions > 0 {
+		versionCount[rec.Key]++
+		if versionCount[rec.Key] > policy.MaxVersions {
+			return false
+		}
+	}
+	
+	return true
 }

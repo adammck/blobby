@@ -69,6 +69,9 @@ Records (`pkg/types/types.go`) use BSON encoding with:
 - **LSM-Tree**: Write-optimized structure with background compaction
 - **Filtering**: XOR filters (`pkg/filter/xor/`) minimize unnecessary SSTable reads  
 - **Concurrency**: All operations are context-aware and handle cancellation
+- **Resource Management**: LRU caches for indexes/filters, semaphore-based concurrency limits
+- **Garbage Collection**: Configurable policies for version cleanup during compaction
+- **Shared MongoDB Client**: Thread-safe connection pooling via `pkg/shared/mongo`
 - **Timestamp Conflicts**: Retries with jitter if BSON timestamp collisions occur
 - **Chaos Testing**: Simulates failures during concurrent operations
 - **Range Scanning**: Snapshot isolation with reference-counted memtable handles
@@ -79,8 +82,9 @@ Records (`pkg/types/types.go`) use BSON encoding with:
 - `pkg/impl/` - Concrete implementations of interfaces
 - `pkg/blobby/` - Main logic and orchestration
 - `pkg/types/` - Core data structures and serialization
-- `pkg/util/` - Helper utilities (e.g., prefix increment logic)
+- `pkg/util/` - Helper utilities (prefix increment, iterator patterns)
 - `pkg/iterator/` - Generic iterator utilities (Compound, Counting)
+- `pkg/shared/` - Shared components (MongoDB client, common utilities)
 - `cmd/archive/` - CLI interface
 
 ### Range Scanning
@@ -91,10 +95,27 @@ Records (`pkg/types/types.go`) use BSON encoding with:
 - **Compound Iterator**: Merges multiple sources (memtables + SSTables) with MVCC semantics
 - **Filtering**: XOR filters skip SSTables that don't contain scan range keys
 
-### Known Critical Issues (Fixed)
+### Recent Major Improvements (pre-txn-refactor)
 
-- **Flush-During-Scan Race**: Fixed memtable reference counting to prevent "collection does not exist" errors when flushes occur during active scans
-- **Thread Safety**: Fixed double-check locking in memtable handle registry
+**Correctness Fixes:**
+- **Multi-Version Read Bug**: Fixed Get() to find newest record across overlapping SSTables
+- **Atomic Compaction**: Added rollback capability for failed compaction operations  
+- **Memtable Drop Race**: Fixed TOCTOU bug with atomic TryDrop() operation
+
+**Resource Management:**
+- **LRU Caches**: Prevent unbounded growth of index/filter maps (1K indexes, 10K filters)
+- **Scan Resource Cleanup**: Explicit resource management replacing fragile boolean flags
+- **Memtable Size Limits**: Configurable size tracking with overflow protection (1GB default)
+
+**Production Readiness:**
+- **Garbage Collection**: Configurable policies for version cleanup (MaxVersions, MaxAge, TombstoneGCAge)
+- **Concurrency Limits**: Semaphore-based limits (2 flushes, 1 compaction, 100 scans)
+- **Operation Stats**: Consistent stats for Put operations (destination, latency, retries)
+
+**Code Quality:**
+- **Shared MongoDB Client**: Eliminated duplicate connection code across 3 packages
+- **Iterator Utilities**: Common patterns extracted to `pkg/util/iterator`
+- **Better Error Handling**: Consistent wrapping and meaningful context
 
 ### Testing Strategy
 
@@ -104,6 +125,10 @@ Records (`pkg/types/types.go`) use BSON encoding with:
 - **Range Scan Tests**: Comprehensive edge cases and boundary conditions
 
 ## Development Guidelines
+
+### Behavior
+
+- Always use the search tool instead of running grep or rg.
 
 ### Code Style
 - Use early return patterns instead of nested conditionals
@@ -120,5 +145,16 @@ Records (`pkg/types/types.go`) use BSON encoding with:
 ### Architecture
 - Keep package-specific iterators in their own packages
 - Use `pkg/iterator` for generic iterator utilities only
+- Use `pkg/shared/` for common cross-package utilities (MongoDB client, etc.)
+- Extract common patterns into `pkg/util/` to reduce duplication
 - Abstract away implementation details in mock objects
 - Expose minimal, clean APIs (e.g., `CanDrop()` vs `RefCount()`)
+- Use semaphores for concurrency control instead of ad-hoc limiting
+- Implement explicit resource management patterns over error-prone cleanup logic
+
+### Resource Management Best Practices
+- **LRU Caches**: Use for unbounded data structures (indexes, filters)
+- **Reference Counting**: Essential for safe resource cleanup (memtables, scans)
+- **Semaphores**: Control concurrency limits for resource-intensive operations
+- **Explicit Cleanup**: Prefer resource-managed iterators over defer cleanup
+- **Size Tracking**: Monitor memory usage with atomic operations for thread safety

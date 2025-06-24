@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
+	sharedmongo "github.com/adammck/blobby/pkg/shared/mongo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -19,36 +20,17 @@ const (
 )
 
 type Store struct {
-	mongo    *mongo.Database
-	mongoURL string
+	mongoClient *sharedmongo.Client
 }
 
 func New(mongoURL string) *Store {
 	return &Store{
-		mongoURL: mongoURL,
+		mongoClient: sharedmongo.NewClient(mongoURL).WithDirect(true),
 	}
 }
 
 func (s *Store) getMongo(ctx context.Context) (*mongo.Database, error) {
-	if s.mongo != nil {
-		return s.mongo, nil
-	}
-
-	// TODO: get rid of the SetDirect. that's just for tests. it belogns in the mongoURL.
-	opt := options.Client().ApplyURI(s.mongoURL).SetTimeout(connectionTimeout).SetDirect(true)
-	client, err := mongo.Connect(ctx, opt)
-	if err != nil {
-		return nil, err
-	}
-
-	ctxPing, cancel := context.WithTimeout(ctx, pingTimeout)
-	defer cancel()
-	if err := client.Ping(ctxPing, nil); err != nil {
-		return nil, err
-	}
-
-	s.mongo = client.Database(defaultDB)
-	return s.mongo, nil
+	return s.mongoClient.GetDB(ctx)
 }
 
 func (s *Store) Init(ctx context.Context) error {
@@ -107,6 +89,57 @@ func (s *Store) Delete(ctx context.Context, meta *api.BlobMeta) error {
 
 	if result.DeletedCount != 1 {
 		return fmt.Errorf("expected to delete 1 record, deleted %d", result.DeletedCount)
+	}
+
+	return nil
+}
+
+// AtomicSwap atomically replaces old metadata entries with a new one.
+// This is used for compaction to ensure metadata consistency.
+func (s *Store) AtomicSwap(ctx context.Context, newMeta *api.BlobMeta, oldMetas []*api.BlobMeta) error {
+	db, err := s.getMongo(ctx)
+	if err != nil {
+		return fmt.Errorf("getMongo: %w", err)
+	}
+
+	// Use MongoDB transaction for atomic metadata swap
+	callback := func(sessCtx mongo.SessionContext) (interface{}, error) {
+		coll := db.Collection(sstablesCollection)
+
+		// Insert new metadata
+		_, err := coll.InsertOne(sessCtx, newMeta)
+		if err != nil {
+			return nil, fmt.Errorf("insert new meta: %w", err)
+		}
+
+		// Delete old metadata entries
+		for i, oldMeta := range oldMetas {
+			result, err := coll.DeleteOne(sessCtx, bson.M{
+				"created": oldMeta.Created,
+				"min_key": oldMeta.MinKey,
+				"max_key": oldMeta.MaxKey,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("delete old meta %d: %w", i, err)
+			}
+			if result.DeletedCount != 1 {
+				return nil, fmt.Errorf("expected to delete 1 record for meta %d, deleted %d", i, result.DeletedCount)
+			}
+		}
+
+		return nil, nil
+	}
+
+	// Execute transaction with retries
+	session, err := db.Client().StartSession()
+	if err != nil {
+		return fmt.Errorf("start session: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, callback)
+	if err != nil {
+		return fmt.Errorf("transaction failed: %w", err)
 	}
 
 	return nil

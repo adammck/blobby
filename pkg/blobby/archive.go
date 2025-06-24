@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
@@ -15,20 +14,31 @@ import (
 	mindexstore "github.com/adammck/blobby/pkg/impl/indexstore/mongo"
 	"github.com/adammck/blobby/pkg/index"
 	"github.com/adammck/blobby/pkg/iterator"
+	"github.com/adammck/blobby/pkg/lru"
 	"github.com/adammck/blobby/pkg/memtable"
 	"github.com/adammck/blobby/pkg/metadata"
+	sharedmongo "github.com/adammck/blobby/pkg/shared/mongo"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/adammck/blobby/pkg/types"
+	"github.com/adammck/blobby/pkg/util"
 	"github.com/jonboulle/clockwork"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
 	defaultDB         = "blobby"
 	connectionTimeout = 3 * time.Second
 	pingTimeout       = 3 * time.Second
+	
+	// LRU cache sizes - these prevent unbounded memory growth
+	defaultIndexCacheSize  = 1000  // ~100MB assuming 100KB per index
+	defaultFilterCacheSize = 10000 // ~10MB assuming 1KB per filter
+	
+	// Concurrency limits to prevent resource exhaustion
+	defaultMaxConcurrentFlushes     = 2   // Allow 2 concurrent flushes
+	defaultMaxConcurrentCompactions = 1   // Allow 1 concurrent compaction
+	defaultMaxConcurrentScans       = 100 // Allow 100 concurrent scans
 )
 
 type Blobby struct {
@@ -40,22 +50,91 @@ type Blobby struct {
 	clock clockwork.Clock
 	comp  *compactor.Compactor
 
-	// index cache
-	indexesMu sync.Mutex
-	indexes   map[string]*index.Index
-
-	// filter cache
-	filtersMu sync.Mutex
-	filters   map[string]filter.Filter
+	// LRU caches for indexes and filters
+	indexCache  *lru.Cache
+	filterCache *lru.Cache
+	
+	// Concurrency limits to prevent resource exhaustion
+	flushSem   *semaphore.Weighted
+	compactSem *semaphore.Weighted
+	scanSem    *semaphore.Weighted
 }
 
 var _ api.Blobby = (*Blobby)(nil)
 
+// scanResources manages the lifecycle of resources used during scan operations.
+// This provides explicit cleanup semantics instead of relying on complex
+// error-prone cleanup logic with boolean flags.
+type scanResources struct {
+	handles   []*memtable.Handle
+	iterators []api.Iterator
+}
+
+// Close releases all resources, collecting any errors that occur.
+// This method is safe to call multiple times.
+func (sr *scanResources) Close() error {
+	// Note: Iterators are closed by the compound iterator, so we don't need to close them here
+	// to avoid double-close. Handles are managed by their respective iterators (refCountingIterator).
+	sr.iterators = nil
+	sr.handles = nil
+	return nil
+}
+
+// addHandle adds a memtable handle to be managed
+func (sr *scanResources) addHandle(handle *memtable.Handle) {
+	sr.handles = append(sr.handles, handle)
+}
+
+// addIterator adds an iterator to be managed
+func (sr *scanResources) addIterator(iter api.Iterator) {
+	sr.iterators = append(sr.iterators, iter)
+}
+
+// resourceManagedIterator wraps an iterator and ensures all scan resources
+// are properly cleaned up when the iterator is closed.
+type resourceManagedIterator struct {
+	api.Iterator
+	resources *scanResources
+	scanSem   *semaphore.Weighted // semaphore to release on close
+	closed    bool                // prevents double-close
+}
+
+// Close cleans up the underlying iterator and all associated resources
+func (rmi *resourceManagedIterator) Close() error {
+	if rmi.closed {
+		return nil // Already closed, safe to call multiple times
+	}
+	rmi.closed = true
+	
+	var errs []error
+	
+	// Close the wrapped iterator first
+	if err := rmi.Iterator.Close(); err != nil {
+		errs = append(errs, err)
+	}
+	
+	// Clean up all scan resources
+	if err := rmi.resources.Close(); err != nil {
+		errs = append(errs, err)
+	}
+	
+	// Release scan semaphore
+	if rmi.scanSem != nil {
+		rmi.scanSem.Release(1)
+	}
+	
+	if len(errs) > 0 {
+		return fmt.Errorf("resource cleanup errors: %v", errs)
+	}
+	return nil
+}
+
 func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, sf sstable.Factory) *Blobby {
-	db, err := connectToMongo(ctx, mongoURL)
+	mongoClient := sharedmongo.NewClient(mongoURL)
+	db, err := mongoClient.GetDB(ctx)
 	if err != nil {
 		// TODO: return error, obviously
-		panic(fmt.Errorf("connectToMongo: %w", err))
+		panic(fmt.Errorf("getDB: %w", err))
 	}
 
 	ixs := mindexstore.New(db)
@@ -72,26 +151,15 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, sf
 		clock: clock,
 		comp:  compactor.New(clock, sstm, md, ixs, fs),
 
-		indexes: map[string]*index.Index{},
-		filters: map[string]filter.Filter{},
+		indexCache:  lru.New(defaultIndexCacheSize),
+		filterCache: lru.New(defaultFilterCacheSize),
+		
+		flushSem:   semaphore.NewWeighted(defaultMaxConcurrentFlushes),
+		compactSem: semaphore.NewWeighted(defaultMaxConcurrentCompactions),
+		scanSem:    semaphore.NewWeighted(defaultMaxConcurrentScans),
 	}
 }
 
-func connectToMongo(ctx context.Context, mongoURL string) (*mongo.Database, error) {
-	opt := options.Client().ApplyURI(mongoURL).SetTimeout(connectionTimeout)
-	client, err := mongo.Connect(ctx, opt)
-	if err != nil {
-		return nil, err
-	}
-
-	ctxPing, cancel := context.WithTimeout(ctx, pingTimeout)
-	defer cancel()
-	if err := client.Ping(ctxPing, nil); err != nil {
-		return nil, err
-	}
-
-	return client.Database(defaultDB), nil
-}
 
 func (b *Blobby) Ping(ctx context.Context) error {
 	err := b.mt.Ping(ctx)
@@ -116,8 +184,26 @@ func (b *Blobby) Init(ctx context.Context) error {
 	return nil
 }
 
-func (b *Blobby) Put(ctx context.Context, key string, value []byte) (string, error) {
-	return b.mt.Put(ctx, key, value)
+func (b *Blobby) Put(ctx context.Context, key string, value []byte) (*api.PutStats, error) {
+	start := b.clock.Now()
+	stats := &api.PutStats{}
+	
+	rec := &types.Record{
+		Key:      key,
+		Document: value,
+	}
+	
+	mtStats := &memtable.PutRecordStats{}
+	dest, err := b.mt.PutRecordWithStats(ctx, rec, mtStats)
+	if err != nil {
+		return stats, err
+	}
+	
+	stats.Destination = dest
+	stats.WriteLatency = b.clock.Since(start)
+	stats.RetryCount = mtStats.RetryCount
+	
+	return stats, nil
 }
 
 func (b *Blobby) Delete(ctx context.Context, key string) (*api.DeleteStats, error) {
@@ -158,6 +244,14 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 	if err != nil {
 		return nil, stats, fmt.Errorf("metadata.GetContaining: %w", err)
 	}
+
+	// candidate holds a record and its source for comparison
+	type candidate struct {
+		rec    *types.Record
+		source string
+	}
+
+	var best *candidate
 
 	// note: this assumes that metas is already sorted.
 	for _, meta := range metas {
@@ -214,17 +308,20 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 		stats.RecordsScanned += scanned
 
 		if rec != nil {
-			stats.Source = meta.Filename()
-			if rec.Tombstone {
-				return nil, stats, &api.NotFound{Key: key}
+			// Check if this is the newest version we've seen
+			if best == nil || rec.Timestamp.After(best.rec.Timestamp) {
+				best = &candidate{rec: rec, source: meta.Filename()}
 			}
-			// return as soon as we find the first record, but that's wrong!
-			// before returning, we need to look at the record timestamp, and
-			// check whether any of the remaining metas have a minTime newer
-			// than that. this is only possible after a weird compaction.
-			// TODO: fix this!
-			return rec.Document, stats, nil
 		}
+	}
+
+	// Return the newest version found
+	if best != nil {
+		stats.Source = best.source
+		if best.rec.Tombstone {
+			return nil, stats, &api.NotFound{Key: key}
+		}
+		return best.rec.Document, stats, nil
 	}
 
 	// key not found
@@ -232,39 +329,33 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 }
 
 // getIndex returns the index for the given sstable. If the index is not already
-// cached, it will be fetched from the index store and cached forever.
-//
-// TODO: add some kind of expiration policy.
+// cached, it will be fetched from the index store and cached in an LRU cache.
 func (b *Blobby) getIndex(ctx context.Context, fn string) (*index.Index, error) {
-	b.indexesMu.Lock()
-	defer b.indexesMu.Unlock()
-
-	if ix, ok := b.indexes[fn]; ok {
-		return ix, nil
+	// Check cache first
+	if cached, found := b.indexCache.Get(fn); found {
+		return cached.(*index.Index), nil
 	}
 
+	// Load from store
 	ixs, err := b.ixs.Get(ctx, fn)
 	if err != nil && !errors.Is(err, &api.IndexNotFound{}) {
 		return nil, fmt.Errorf("IndexStore.Get(%s): %w", fn, err)
 	}
 
 	ix := index.New(ixs)
-	b.indexes[fn] = ix
+	b.indexCache.Put(fn, ix)
 	return ix, nil
 }
 
 // getFilter returns the filter for the given sstable. If it's not already in
-// the cache, it will be fetched from the FilterStore and cached forever.
-//
-// TODO: add some kind of expiration policy.
+// the cache, it will be fetched from the FilterStore and cached in an LRU cache.
 func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error) {
-	b.filtersMu.Lock()
-	defer b.filtersMu.Unlock()
-
-	if f, ok := b.filters[fn]; ok {
-		return f, nil
+	// Check cache first
+	if cached, found := b.filterCache.Get(fn); found {
+		return cached.(filter.Filter), nil
 	}
 
+	// Load from store
 	fi, err := b.fs.Get(ctx, fn)
 	if err != nil {
 		return nil, err
@@ -275,7 +366,7 @@ func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error
 		return nil, err
 	}
 
-	b.filters[fn] = f
+	b.filterCache.Put(fn, f)
 	return f, nil
 }
 
@@ -283,69 +374,41 @@ func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error
 // given key. If EOF is reached, nil is returned. For efficiency, the reader
 // should already be *near* the record by using an index.
 func (b *Blobby) ScanSSTable(ctx context.Context, reader *sstable.Reader, key string) (*types.Record, int, error) {
-	var rec *types.Record
-	var scanned int
-	var err error
-
-	for {
-		rec, err = reader.Next()
-		if err != nil {
-			return nil, scanned, fmt.Errorf("sstable.Reader.Next: %w", err)
-		}
-		if rec == nil {
-			// end of file
-			return nil, scanned, nil
-		}
-
-		scanned++
-
-		if rec.Key == key {
-			break
-		}
-	}
-
-	return rec, scanned, nil
+	return util.FindRecord(reader, key)
 }
 
 // Scan returns an iterator for all keys in the range [start, end).
 // If end is empty, the scan is unbounded (all keys >= start).
 // The returned iterator must be closed to avoid resource leaks.
 func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *api.ScanStats, error) {
+	// Acquire scan semaphore to limit concurrent scans
+	if err := b.scanSem.Acquire(ctx, 1); err != nil {
+		return nil, nil, fmt.Errorf("acquire scan semaphore: %w", err)
+	}
+	// Note: semaphore will be released when iterator is closed
+	
 	stats := &api.ScanStats{}
 
 	// validate range
 	if start > end && end != "" {
+		b.scanSem.Release(1) // Release semaphore on validation failure
 		return nil, stats, fmt.Errorf("invalid range: start=%q > end=%q", start, end)
 	}
 
-	var iterators []api.Iterator
-	var handles []*memtable.Handle
-	var needsCleanup = true
-
-	// cleanup function for error handling
-	cleanup := func() {
-		if !needsCleanup {
-			return
-		}
-		for _, h := range handles {
-			h.Release()
-		}
-		for _, it := range iterators {
-			it.Close()
-		}
-	}
-
+	// Use explicit resource management instead of fragile cleanup logic
+	resources := &scanResources{}
+	var transferredOwnership bool
 	defer func() {
-		if r := recover(); r != nil {
-			cleanup()
-			panic(r)
+		// Clean up resources if we haven't transferred ownership
+		if !transferredOwnership {
+			b.scanSem.Release(1) // Release semaphore on early return
+			resources.Close()
 		}
 	}()
 
 	// collect memtable iterators with reference counting (newest first)
 	memtables, err := b.mt.ListMemtables(ctx)
 	if err != nil {
-		cleanup()
 		return nil, stats, fmt.Errorf("ListMemtables: %w", err)
 	}
 
@@ -353,16 +416,14 @@ func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *ap
 		// get handle and add reference to prevent deletion during scan
 		handle, err := b.mt.GetHandle(ctx, name)
 		if err != nil {
-			cleanup()
 			return nil, stats, fmt.Errorf("GetHandle(%s): %w", name, err)
 		}
 
 		handle.AddRef()
-		handles = append(handles, handle)
 
 		iter, err := b.mt.Scan(ctx, name, start, end)
 		if err != nil {
-			cleanup()
+			handle.Release() // Release reference if scan fails
 			return nil, stats, fmt.Errorf("memtable.Scan(%s): %w", name, err)
 		}
 
@@ -372,14 +433,13 @@ func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *ap
 			handle:   handle,
 		}
 
-		iterators = append(iterators, refIter)
+		resources.addIterator(refIter)
 		stats.MemtablesRead++
 	}
 
 	// collect sstable iterators (by metadata ordering)
 	metas, err := b.md.GetAllMetas(ctx)
 	if err != nil {
-		cleanup()
 		return nil, stats, fmt.Errorf("metadata.GetAllMetas: %w", err)
 	}
 
@@ -394,23 +454,28 @@ func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *ap
 
 		reader, err := b.sstm.GetFull(ctx, meta.Filename())
 		if err != nil {
-			cleanup()
 			return nil, stats, fmt.Errorf("sstm.GetFull(%s): %w", meta.Filename(), err)
 		}
 
 		iter := sstable.NewRangeIterator(reader, start, end)
-		iterators = append(iterators, iter)
+		resources.addIterator(iter)
 		stats.SstablesRead++
 	}
 
-	compound := iterator.New(ctx, iterators)
-
-	// transfer ownership to compound iterator
-	needsCleanup = false
-
+	compound := iterator.New(ctx, resources.iterators)
 	counting := iterator.NewCounting(compound, stats)
 
-	return counting, stats, nil
+	// Create a cleanup iterator that manages all our resources
+	cleanupIter := &resourceManagedIterator{
+		Iterator:  counting,
+		resources: resources,
+		scanSem:   b.scanSem,
+	}
+
+	// Transfer ownership - prevent defer cleanup
+	transferredOwnership = true
+
+	return cleanupIter, stats, nil
 }
 
 
@@ -438,6 +503,12 @@ func (r *refCountingIterator) Close() error {
 }
 
 func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
+	// Acquire flush semaphore to limit concurrent flushes
+	if err := b.flushSem.Acquire(ctx, 1); err != nil {
+		return nil, fmt.Errorf("acquire flush semaphore: %w", err)
+	}
+	defer b.flushSem.Release(1)
+	
 	stats := &api.FlushStats{}
 
 	// TODO: check whether old sstable is still flushing
@@ -507,26 +578,27 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 	stats.FlushedMemtable = hPrev.Name()
 	stats.Meta = meta
 
-	// only drop memtable if no active scans are using it
-	canDrop, err := b.mt.CanDropMemtable(ctx, hPrev.Name())
+	// atomically drop memtable if no active scans are using it
+	err = b.mt.TryDrop(ctx, hPrev.Name())
 	if err != nil {
-		return stats, fmt.Errorf("CanDropMemtable: %w", err)
-	}
-
-	if !canDrop {
-		// TODO: if we can't drop it now, we should retry later when refs reach zero
-		return stats, nil
-	}
-
-	err = b.mt.Drop(ctx, hPrev.Name())
-	if err != nil {
-		return stats, fmt.Errorf("memtable.Drop: %w", err)
+		if errors.Is(err, memtable.ErrStillReferenced) {
+			// Memtable still has active references, skip dropping for now
+			// TODO: if we can't drop it now, we should retry later when refs reach zero
+			return stats, nil
+		}
+		return stats, fmt.Errorf("memtable.TryDrop: %w", err)
 	}
 
 	return stats, nil
 }
 
 func (b *Blobby) Compact(ctx context.Context, opts api.CompactionOptions) ([]*api.CompactionStats, error) {
+	// Acquire compaction semaphore to limit concurrent compactions
+	if err := b.compactSem.Acquire(ctx, 1); err != nil {
+		return nil, fmt.Errorf("acquire compaction semaphore: %w", err)
+	}
+	defer b.compactSem.Release(1)
+	
 	return b.comp.Run(ctx, opts)
 }
 

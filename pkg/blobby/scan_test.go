@@ -615,6 +615,13 @@ func TestScanLargeRange(t *testing.T) {
 // This bug was particularly insidious because it only manifested under specific timing
 // conditions during concurrent flush operations, making it difficult to reproduce in 
 // simple unit tests but causing frequent failures in production workloads.
+//
+// TODO: Fix scan isolation bug - iterator skips records across flush operations
+// Current behavior: When a scan reads 3 records (key-00, key-01, key-02), then a flush
+// occurs, the scan resumes at key-04 instead of key-03, causing one record to be lost.
+// This suggests an issue with iterator state preservation across memtable flush operations.
+// The scan should maintain snapshot isolation and see all records that existed when
+// the scan started, regardless of concurrent flush operations.
 func TestScanMemtableFlushDuringIteration(t *testing.T) {
 	c := clockwork.NewFakeClockAt(time.Now().Truncate(time.Second))
 	ctx, _, b := setup(t, c)

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go test:*)",
+      "Bash(go build:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(bin/test.sh:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(git rm:*)"
+    ],
+    "deny": []
+  }
+}
