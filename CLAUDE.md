@@ -105,6 +105,10 @@ Records (`pkg/types/types.go`) use BSON encoding with:
 
 ## Development Guidelines
 
+### Behavior
+
+- Always use the search tool instead of running grep or rg.
+
 ### Code Style
 - Use early return patterns instead of nested conditionals
 - Remove comments that just describe what code does

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
@@ -26,7 +27,22 @@ const (
 	// use for ordering.
 	retrySleep  = 1 * time.Millisecond
 	retryJitter = 100 * time.Microsecond // 0.1ms
+	
+	// Size limits to prevent OOM
+	defaultMaxMemtableSize = 1024 * 1024 * 1024 // 1GB default - generous limit for tests
+	recordOverheadBytes    = 100                 // estimated BSON overhead per record
 )
+
+// ErrMemtableFull is returned when a memtable reaches its size limit
+type ErrMemtableFull struct {
+	CurrentSize int64
+	MaxSize     int64
+}
+
+func (e *ErrMemtableFull) Error() string {
+	return fmt.Sprintf("memtable full: current size %d bytes exceeds max size %d bytes", 
+		e.CurrentSize, e.MaxSize)
+}
 
 type memtableInfo struct {
 	ID      string    `bson:"_id"`
@@ -44,6 +60,10 @@ type Memtable struct {
 	// concurrent operations (scans, flushes, compactions)
 	handlesMu sync.RWMutex
 	handles   map[string]*Handle
+	
+	// Size tracking for the active memtable to prevent OOM
+	activeSizeEstimate int64 // atomic access only
+	maxSize           int64
 }
 
 func New(mongoURL string, clock clockwork.Clock) *Memtable {
@@ -51,7 +71,23 @@ func New(mongoURL string, clock clockwork.Clock) *Memtable {
 		mongoURL: mongoURL,
 		clock:    clock,
 		handles:  make(map[string]*Handle),
+		maxSize:  defaultMaxMemtableSize,
 	}
+}
+
+// SetMaxSize configures the maximum size for active memtables
+func (mt *Memtable) SetMaxSize(maxSize int64) {
+	mt.maxSize = maxSize
+}
+
+// GetCurrentSize returns the estimated current size of the active memtable
+func (mt *Memtable) GetCurrentSize() int64 {
+	return atomic.LoadInt64(&mt.activeSizeEstimate)
+}
+
+// GetMaxSize returns the maximum allowed size for memtables
+func (mt *Memtable) GetMaxSize() int64 {
+	return mt.maxSize
 }
 
 func (mt *Memtable) Get(ctx context.Context, key string) (*types.Record, string, error) {
@@ -121,6 +157,18 @@ func (mt *Memtable) PutRecord(ctx context.Context, rec *types.Record) (string, e
 		return "", fmt.Errorf("record timestamp must be unset, will be assigned automatically")
 	}
 
+	// Estimate the size this record will consume
+	estimatedSize := mt.estimateRecordSize(rec)
+	
+	// Check if adding this record would exceed the size limit
+	currentSize := atomic.LoadInt64(&mt.activeSizeEstimate)
+	if currentSize+estimatedSize > mt.maxSize {
+		return "", &ErrMemtableFull{
+			CurrentSize: currentSize,
+			MaxSize:     mt.maxSize,
+		}
+	}
+
 	c, err := mt.activeCollection(ctx)
 	if err != nil {
 		return "", err
@@ -131,6 +179,8 @@ func (mt *Memtable) PutRecord(ctx context.Context, rec *types.Record) (string, e
 
 		_, err = c.InsertOne(ctx, rec)
 		if err == nil {
+			// Successfully inserted, update size estimate
+			atomic.AddInt64(&mt.activeSizeEstimate, estimatedSize)
 			break
 		}
 
@@ -146,6 +196,16 @@ func (mt *Memtable) PutRecord(ctx context.Context, rec *types.Record) (string, e
 	}
 
 	return c.Name(), nil
+}
+
+// estimateRecordSize returns an approximate size in bytes for a record
+func (mt *Memtable) estimateRecordSize(rec *types.Record) int64 {
+	size := int64(len(rec.Key))
+	if rec.Document != nil {
+		size += int64(len(rec.Document))
+	}
+	size += recordOverheadBytes // BSON overhead, timestamp, etc.
+	return size
 }
 
 func (mt *Memtable) Ping(ctx context.Context) error {
@@ -306,6 +366,10 @@ func (mt *Memtable) Rotate(ctx context.Context) (hPrev *Handle, hNext *Handle, e
 	}
 
 	hPrev = NewHandle(db, activeName)
+	
+	// Reset size estimate for the new active memtable
+	atomic.StoreInt64(&mt.activeSizeEstimate, 0)
+	
 	return hPrev, hNext, nil
 }
 
@@ -339,8 +403,9 @@ func (mt *Memtable) TryDrop(ctx context.Context, name string) error {
 
 	handle, exists := mt.handles[name]
 	if !exists {
-		// Handle doesn't exist, memtable probably already dropped
-		return nil
+		// No handle exists, which means no active references.
+		// Safe to drop directly.
+		return mt.dropLocked(ctx, name)
 	}
 
 	// Atomic check-and-drop under lock

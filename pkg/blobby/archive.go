@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
@@ -15,6 +14,7 @@ import (
 	mindexstore "github.com/adammck/blobby/pkg/impl/indexstore/mongo"
 	"github.com/adammck/blobby/pkg/index"
 	"github.com/adammck/blobby/pkg/iterator"
+	"github.com/adammck/blobby/pkg/lru"
 	"github.com/adammck/blobby/pkg/memtable"
 	"github.com/adammck/blobby/pkg/metadata"
 	"github.com/adammck/blobby/pkg/sstable"
@@ -29,6 +29,10 @@ const (
 	defaultDB         = "blobby"
 	connectionTimeout = 3 * time.Second
 	pingTimeout       = 3 * time.Second
+	
+	// LRU cache sizes - these prevent unbounded memory growth
+	defaultIndexCacheSize  = 1000  // ~100MB assuming 100KB per index
+	defaultFilterCacheSize = 10000 // ~10MB assuming 1KB per filter
 )
 
 type Blobby struct {
@@ -40,16 +44,87 @@ type Blobby struct {
 	clock clockwork.Clock
 	comp  *compactor.Compactor
 
-	// index cache
-	indexesMu sync.Mutex
-	indexes   map[string]*index.Index
-
-	// filter cache
-	filtersMu sync.Mutex
-	filters   map[string]filter.Filter
+	// LRU caches for indexes and filters
+	indexCache  *lru.Cache
+	filterCache *lru.Cache
 }
 
 var _ api.Blobby = (*Blobby)(nil)
+
+// scanResources manages the lifecycle of resources used during scan operations.
+// This provides explicit cleanup semantics instead of relying on complex
+// error-prone cleanup logic with boolean flags.
+type scanResources struct {
+	handles   []*memtable.Handle
+	iterators []api.Iterator
+}
+
+// Close releases all resources, collecting any errors that occur.
+// This method is safe to call multiple times.
+func (sr *scanResources) Close() error {
+	var errs []error
+	
+	// Close all iterators (refCountingIterator will handle releasing its own handle)
+	for _, it := range sr.iterators {
+		if it != nil {
+			if err := it.Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	sr.iterators = nil
+	
+	// Release any remaining handles not managed by iterators
+	for _, h := range sr.handles {
+		if h != nil {
+			h.Release()
+		}
+	}
+	sr.handles = nil
+	
+	// Return combined errors if any occurred
+	if len(errs) > 0 {
+		return fmt.Errorf("scan cleanup errors: %v", errs)
+	}
+	return nil
+}
+
+// addHandle adds a memtable handle to be managed
+func (sr *scanResources) addHandle(handle *memtable.Handle) {
+	sr.handles = append(sr.handles, handle)
+}
+
+// addIterator adds an iterator to be managed
+func (sr *scanResources) addIterator(iter api.Iterator) {
+	sr.iterators = append(sr.iterators, iter)
+}
+
+// resourceManagedIterator wraps an iterator and ensures all scan resources
+// are properly cleaned up when the iterator is closed.
+type resourceManagedIterator struct {
+	api.Iterator
+	resources *scanResources
+}
+
+// Close cleans up the underlying iterator and all associated resources
+func (rmi *resourceManagedIterator) Close() error {
+	var errs []error
+	
+	// Close the wrapped iterator first
+	if err := rmi.Iterator.Close(); err != nil {
+		errs = append(errs, err)
+	}
+	
+	// Clean up all scan resources
+	if err := rmi.resources.Close(); err != nil {
+		errs = append(errs, err)
+	}
+	
+	if len(errs) > 0 {
+		return fmt.Errorf("resource cleanup errors: %v", errs)
+	}
+	return nil
+}
 
 func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, sf sstable.Factory) *Blobby {
 	db, err := connectToMongo(ctx, mongoURL)
@@ -72,8 +147,8 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, sf
 		clock: clock,
 		comp:  compactor.New(clock, sstm, md, ixs, fs),
 
-		indexes: map[string]*index.Index{},
-		filters: map[string]filter.Filter{},
+		indexCache:  lru.New(defaultIndexCacheSize),
+		filterCache: lru.New(defaultFilterCacheSize),
 	}
 }
 
@@ -243,39 +318,33 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 }
 
 // getIndex returns the index for the given sstable. If the index is not already
-// cached, it will be fetched from the index store and cached forever.
-//
-// TODO: add some kind of expiration policy.
+// cached, it will be fetched from the index store and cached in an LRU cache.
 func (b *Blobby) getIndex(ctx context.Context, fn string) (*index.Index, error) {
-	b.indexesMu.Lock()
-	defer b.indexesMu.Unlock()
-
-	if ix, ok := b.indexes[fn]; ok {
-		return ix, nil
+	// Check cache first
+	if cached, found := b.indexCache.Get(fn); found {
+		return cached.(*index.Index), nil
 	}
 
+	// Load from store
 	ixs, err := b.ixs.Get(ctx, fn)
 	if err != nil && !errors.Is(err, &api.IndexNotFound{}) {
 		return nil, fmt.Errorf("IndexStore.Get(%s): %w", fn, err)
 	}
 
 	ix := index.New(ixs)
-	b.indexes[fn] = ix
+	b.indexCache.Put(fn, ix)
 	return ix, nil
 }
 
 // getFilter returns the filter for the given sstable. If it's not already in
-// the cache, it will be fetched from the FilterStore and cached forever.
-//
-// TODO: add some kind of expiration policy.
+// the cache, it will be fetched from the FilterStore and cached in an LRU cache.
 func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error) {
-	b.filtersMu.Lock()
-	defer b.filtersMu.Unlock()
-
-	if f, ok := b.filters[fn]; ok {
-		return f, nil
+	// Check cache first
+	if cached, found := b.filterCache.Get(fn); found {
+		return cached.(filter.Filter), nil
 	}
 
+	// Load from store
 	fi, err := b.fs.Get(ctx, fn)
 	if err != nil {
 		return nil, err
@@ -286,7 +355,7 @@ func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error
 		return nil, err
 	}
 
-	b.filters[fn] = f
+	b.filterCache.Put(fn, f)
 	return f, nil
 }
 
@@ -329,34 +398,19 @@ func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *ap
 		return nil, stats, fmt.Errorf("invalid range: start=%q > end=%q", start, end)
 	}
 
-	var iterators []api.Iterator
-	var handles []*memtable.Handle
-	var needsCleanup = true
-
-	// cleanup function for error handling
-	cleanup := func() {
-		if !needsCleanup {
-			return
-		}
-		for _, h := range handles {
-			h.Release()
-		}
-		for _, it := range iterators {
-			it.Close()
-		}
-	}
-
+	// Use explicit resource management instead of fragile cleanup logic
+	resources := &scanResources{}
+	var transferredOwnership bool
 	defer func() {
-		if r := recover(); r != nil {
-			cleanup()
-			panic(r)
+		// Clean up resources if we haven't transferred ownership
+		if !transferredOwnership {
+			resources.Close()
 		}
 	}()
 
 	// collect memtable iterators with reference counting (newest first)
 	memtables, err := b.mt.ListMemtables(ctx)
 	if err != nil {
-		cleanup()
 		return nil, stats, fmt.Errorf("ListMemtables: %w", err)
 	}
 
@@ -364,16 +418,13 @@ func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *ap
 		// get handle and add reference to prevent deletion during scan
 		handle, err := b.mt.GetHandle(ctx, name)
 		if err != nil {
-			cleanup()
 			return nil, stats, fmt.Errorf("GetHandle(%s): %w", name, err)
 		}
 
 		handle.AddRef()
-		handles = append(handles, handle)
 
 		iter, err := b.mt.Scan(ctx, name, start, end)
 		if err != nil {
-			cleanup()
 			return nil, stats, fmt.Errorf("memtable.Scan(%s): %w", name, err)
 		}
 
@@ -383,14 +434,13 @@ func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *ap
 			handle:   handle,
 		}
 
-		iterators = append(iterators, refIter)
+		resources.addIterator(refIter)
 		stats.MemtablesRead++
 	}
 
 	// collect sstable iterators (by metadata ordering)
 	metas, err := b.md.GetAllMetas(ctx)
 	if err != nil {
-		cleanup()
 		return nil, stats, fmt.Errorf("metadata.GetAllMetas: %w", err)
 	}
 
@@ -405,23 +455,27 @@ func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *ap
 
 		reader, err := b.sstm.GetFull(ctx, meta.Filename())
 		if err != nil {
-			cleanup()
 			return nil, stats, fmt.Errorf("sstm.GetFull(%s): %w", meta.Filename(), err)
 		}
 
 		iter := sstable.NewRangeIterator(reader, start, end)
-		iterators = append(iterators, iter)
+		resources.addIterator(iter)
 		stats.SstablesRead++
 	}
 
-	compound := iterator.New(ctx, iterators)
-
-	// transfer ownership to compound iterator
-	needsCleanup = false
-
+	compound := iterator.New(ctx, resources.iterators)
 	counting := iterator.NewCounting(compound, stats)
 
-	return counting, stats, nil
+	// Create a cleanup iterator that manages all our resources
+	cleanupIter := &resourceManagedIterator{
+		Iterator:  counting,
+		resources: resources,
+	}
+
+	// Transfer ownership - prevent defer cleanup
+	transferredOwnership = true
+
+	return cleanupIter, stats, nil
 }
 
 
