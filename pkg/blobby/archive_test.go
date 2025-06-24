@@ -709,9 +709,9 @@ type testBlobby struct {
 }
 
 func (ta *testBlobby) put(key string, val []byte) string {
-	dest, err := ta.b.Put(ta.ctx, key, val)
+	stats, err := ta.b.Put(ta.ctx, key, val)
 	require.NoError(ta.t, err)
-	return dest
+	return stats.Destination
 }
 
 func (ta *testBlobby) get(key string) ([]byte, *api.GetStats) {

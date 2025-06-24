@@ -5,7 +5,8 @@
       "Bash(go build:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(bin/test.sh:*)"
+      "Bash(bin/test.sh:*)",
+      "mcp__ide__getDiagnostics"
     ],
     "deny": []
   }

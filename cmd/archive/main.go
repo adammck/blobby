@@ -182,10 +182,11 @@ func cmdPut(ctx context.Context, b *blobby.Blobby, r io.Reader) {
 			log.Fatalf("bson.Marshal: %s", err)
 		}
 
-		dest, err = b.Put(ctx, k, bb)
+		stats, err := b.Put(ctx, k, bb)
 		if err != nil {
 			log.Fatalf("Put: %s", err)
 		}
+		dest = stats.Destination
 
 		n += 1
 	}

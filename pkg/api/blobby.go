@@ -26,8 +26,11 @@ type GetStats struct {
 	RecordsScanned int
 }
 
-// TODO: Implement PutStats
+// PutStats contains metadata about a put operation
 type PutStats struct {
+	Destination   string        // Which memtable the record was written to
+	WriteLatency  time.Duration // How long the write took
+	RetryCount    int           // Number of timestamp collision retries
 }
 
 // DeleteStats contains metadata about a delete operation.
@@ -104,6 +107,24 @@ const (
 	LargestFirst
 )
 
+// GCPolicy defines garbage collection rules for compaction
+type GCPolicy struct {
+	// MaxVersions specifies the maximum number of versions to keep per key.
+	// Zero means keep all versions (no version limit).
+	MaxVersions int
+
+	// MaxAge specifies the maximum age of records to keep.
+	// Records older than this will be garbage collected.
+	// Zero means no age limit.
+	MaxAge time.Duration
+
+	// TombstoneGCAge specifies how long to keep tombstones.
+	// Tombstones older than this will be garbage collected, allowing
+	// space reclamation while ensuring deleted keys stay deleted.
+	// Zero means keep tombstones forever.
+	TombstoneGCAge time.Duration
+}
+
 type CompactionOptions struct {
 	// Order specifies the order in which files should be considered for
 	// compaction. The default is OldestFirst.
@@ -137,6 +158,10 @@ type CompactionOptions struct {
 	// once. This is mostly to avoid shuffling too much metadata around.
 	MaxFiles int
 
+	// GC specifies garbage collection policy for records during compaction.
+	// When set, old versions and expired records will be removed.
+	GC *GCPolicy
+
 	// only compact a subset of the keyspace?
 	//MinKey string
 	//MaxKey string
@@ -153,7 +178,7 @@ type CompactionStats struct {
 // Blobby is the public interface to Blobby. It's defined here so test doubles
 // can implement it too.
 type Blobby interface {
-	Put(ctx context.Context, key string, value []byte) (string, error)
+	Put(ctx context.Context, key string, value []byte) (*PutStats, error)
 	Get(ctx context.Context, key string) ([]byte, *GetStats, error)
 	Scan(ctx context.Context, start, end string) (Iterator, *ScanStats, error)
 	Flush(ctx context.Context) (*FlushStats, error)

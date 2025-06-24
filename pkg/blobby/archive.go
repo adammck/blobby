@@ -23,6 +23,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -33,6 +34,11 @@ const (
 	// LRU cache sizes - these prevent unbounded memory growth
 	defaultIndexCacheSize  = 1000  // ~100MB assuming 100KB per index
 	defaultFilterCacheSize = 10000 // ~10MB assuming 1KB per filter
+	
+	// Concurrency limits to prevent resource exhaustion
+	defaultMaxConcurrentFlushes     = 2   // Allow 2 concurrent flushes
+	defaultMaxConcurrentCompactions = 1   // Allow 1 concurrent compaction
+	defaultMaxConcurrentScans       = 100 // Allow 100 concurrent scans
 )
 
 type Blobby struct {
@@ -47,6 +53,11 @@ type Blobby struct {
 	// LRU caches for indexes and filters
 	indexCache  *lru.Cache
 	filterCache *lru.Cache
+	
+	// Concurrency limits to prevent resource exhaustion
+	flushSem   *semaphore.Weighted
+	compactSem *semaphore.Weighted
+	scanSem    *semaphore.Weighted
 }
 
 var _ api.Blobby = (*Blobby)(nil)
@@ -104,6 +115,7 @@ func (sr *scanResources) addIterator(iter api.Iterator) {
 type resourceManagedIterator struct {
 	api.Iterator
 	resources *scanResources
+	scanSem   *semaphore.Weighted // semaphore to release on close
 }
 
 // Close cleans up the underlying iterator and all associated resources
@@ -118,6 +130,11 @@ func (rmi *resourceManagedIterator) Close() error {
 	// Clean up all scan resources
 	if err := rmi.resources.Close(); err != nil {
 		errs = append(errs, err)
+	}
+	
+	// Release scan semaphore
+	if rmi.scanSem != nil {
+		rmi.scanSem.Release(1)
 	}
 	
 	if len(errs) > 0 {
@@ -149,6 +166,10 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, sf
 
 		indexCache:  lru.New(defaultIndexCacheSize),
 		filterCache: lru.New(defaultFilterCacheSize),
+		
+		flushSem:   semaphore.NewWeighted(defaultMaxConcurrentFlushes),
+		compactSem: semaphore.NewWeighted(defaultMaxConcurrentCompactions),
+		scanSem:    semaphore.NewWeighted(defaultMaxConcurrentScans),
 	}
 }
 
@@ -191,8 +212,26 @@ func (b *Blobby) Init(ctx context.Context) error {
 	return nil
 }
 
-func (b *Blobby) Put(ctx context.Context, key string, value []byte) (string, error) {
-	return b.mt.Put(ctx, key, value)
+func (b *Blobby) Put(ctx context.Context, key string, value []byte) (*api.PutStats, error) {
+	start := b.clock.Now()
+	stats := &api.PutStats{}
+	
+	rec := &types.Record{
+		Key:      key,
+		Document: value,
+	}
+	
+	mtStats := &memtable.PutRecordStats{}
+	dest, err := b.mt.PutRecordWithStats(ctx, rec, mtStats)
+	if err != nil {
+		return stats, err
+	}
+	
+	stats.Destination = dest
+	stats.WriteLatency = b.clock.Since(start)
+	stats.RetryCount = mtStats.RetryCount
+	
+	return stats, nil
 }
 
 func (b *Blobby) Delete(ctx context.Context, key string) (*api.DeleteStats, error) {
@@ -391,10 +430,17 @@ func (b *Blobby) ScanSSTable(ctx context.Context, reader *sstable.Reader, key st
 // If end is empty, the scan is unbounded (all keys >= start).
 // The returned iterator must be closed to avoid resource leaks.
 func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *api.ScanStats, error) {
+	// Acquire scan semaphore to limit concurrent scans
+	if err := b.scanSem.Acquire(ctx, 1); err != nil {
+		return nil, nil, fmt.Errorf("acquire scan semaphore: %w", err)
+	}
+	// Note: semaphore will be released when iterator is closed
+	
 	stats := &api.ScanStats{}
 
 	// validate range
 	if start > end && end != "" {
+		b.scanSem.Release(1) // Release semaphore on validation failure
 		return nil, stats, fmt.Errorf("invalid range: start=%q > end=%q", start, end)
 	}
 
@@ -404,6 +450,7 @@ func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *ap
 	defer func() {
 		// Clean up resources if we haven't transferred ownership
 		if !transferredOwnership {
+			b.scanSem.Release(1) // Release semaphore on early return
 			resources.Close()
 		}
 	}()
@@ -470,6 +517,7 @@ func (b *Blobby) Scan(ctx context.Context, start, end string) (api.Iterator, *ap
 	cleanupIter := &resourceManagedIterator{
 		Iterator:  counting,
 		resources: resources,
+		scanSem:   b.scanSem,
 	}
 
 	// Transfer ownership - prevent defer cleanup
@@ -503,6 +551,12 @@ func (r *refCountingIterator) Close() error {
 }
 
 func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
+	// Acquire flush semaphore to limit concurrent flushes
+	if err := b.flushSem.Acquire(ctx, 1); err != nil {
+		return nil, fmt.Errorf("acquire flush semaphore: %w", err)
+	}
+	defer b.flushSem.Release(1)
+	
 	stats := &api.FlushStats{}
 
 	// TODO: check whether old sstable is still flushing
@@ -587,6 +641,12 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 }
 
 func (b *Blobby) Compact(ctx context.Context, opts api.CompactionOptions) ([]*api.CompactionStats, error) {
+	// Acquire compaction semaphore to limit concurrent compactions
+	if err := b.compactSem.Acquire(ctx, 1); err != nil {
+		return nil, fmt.Errorf("acquire compaction semaphore: %w", err)
+	}
+	defer b.compactSem.Release(1)
+	
 	return b.comp.Run(ctx, opts)
 }
 

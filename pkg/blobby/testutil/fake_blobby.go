@@ -39,12 +39,16 @@ func (m *FakeBlobby) Get(ctx context.Context, key string) ([]byte, *api.GetStats
 	return val, &api.GetStats{}, nil
 }
 
-func (m *FakeBlobby) Put(ctx context.Context, key string, value []byte) (string, error) {
+func (m *FakeBlobby) Put(ctx context.Context, key string, value []byte) (*api.PutStats, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.data[key] = value
-	return "model", nil
+	return &api.PutStats{
+		Destination:  "model",
+		WriteLatency: 0,
+		RetryCount:   0,
+	}, nil
 }
 
 func (m *FakeBlobby) Delete(ctx context.Context, key string) (*api.DeleteStats, error) {

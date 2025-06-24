@@ -149,10 +149,22 @@ func (mt *Memtable) Put(ctx context.Context, key string, value []byte) (string, 
 	})
 }
 
+// PutRecordStats tracks statistics for put operations
+type PutRecordStats struct {
+	RetryCount int
+}
+
 // PutRecord inserts a pre-constructed record. Use this for tombstones or when
 // you need precise control over the record fields. Use Put for normal writes
 // and Delete for deletions.
 func (mt *Memtable) PutRecord(ctx context.Context, rec *types.Record) (string, error) {
+	stats := &PutRecordStats{}
+	dest, err := mt.PutRecordWithStats(ctx, rec, stats)
+	return dest, err
+}
+
+// PutRecordWithStats inserts a record and returns detailed statistics
+func (mt *Memtable) PutRecordWithStats(ctx context.Context, rec *types.Record, stats *PutRecordStats) (string, error) {
 	if !rec.Timestamp.IsZero() {
 		return "", fmt.Errorf("record timestamp must be unset, will be assigned automatically")
 	}
@@ -187,6 +199,7 @@ func (mt *Memtable) PutRecord(ctx context.Context, rec *types.Record) (string, e
 		// sleep and retry to get a new timestamp. it's almost certainly been
 		// long enough already, but this makes testing easier.
 		if mongo.IsDuplicateKeyError(err) {
+			stats.RetryCount++
 			jitter := time.Duration(rand.Int63n(retryJitter.Nanoseconds()))
 			mt.clock.Sleep(retrySleep + jitter)
 			continue

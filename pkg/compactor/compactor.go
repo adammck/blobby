@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"time"
 
 	"github.com/adammck/blobby/pkg/api"
 	"github.com/adammck/blobby/pkg/filter"
@@ -48,14 +49,14 @@ func (c *Compactor) Run(ctx context.Context, opts api.CompactionOptions) ([]*api
 
 	stats := []*api.CompactionStats{}
 	for _, cc := range compactions {
-		s := c.Compact(ctx, cc)
+		s := c.Compact(ctx, cc, opts.GC)
 		stats = append(stats, s)
 	}
 
 	return stats, nil
 }
 
-func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.CompactionStats {
+func (c *Compactor) Compact(ctx context.Context, cc *Compaction, gcPolicy *api.GCPolicy) *api.CompactionStats {
 	stats := &api.CompactionStats{
 		Inputs: cc.Inputs,
 	}
@@ -71,10 +72,6 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 		readers[i] = r
 	}
 
-	// TODO: do filtering here, to expire data by timestamp and version count
-
-	// TODO: also do partitioning here, so large files can be split by key.
-
 	ch := make(chan *types.Record)
 	g, ctx2 := errgroup.WithContext(ctx)
 
@@ -86,18 +83,12 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 			return fmt.Errorf("NewMergeReader: %w", err)
 		}
 
-		for {
-			rec, err := mr.Next()
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				return fmt.Errorf("NewMergeReader: %w", err)
-			}
-			ch <- rec
+		// Apply GC policy if specified
+		if gcPolicy != nil {
+			return c.mergeWithGC(ctx2, mr, ch, gcPolicy)
+		} else {
+			return c.mergeWithoutGC(ctx2, mr, ch)
 		}
-
-		return nil
 	})
 
 	var meta *api.BlobMeta
@@ -259,4 +250,73 @@ func (c *Compactor) compactWithRollback(ctx context.Context, cc *Compaction, met
 		Inputs:  cc.Inputs,
 		Outputs: []*api.BlobMeta{meta},
 	}
+}
+
+// mergeWithoutGC performs simple merge without garbage collection
+func (c *Compactor) mergeWithoutGC(ctx context.Context, mr *sstable.MergeReader, ch chan<- *types.Record) error {
+	for {
+		rec, err := mr.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("MergeReader.Next: %w", err)
+		}
+		
+		select {
+		case ch <- rec:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+// mergeWithGC performs merge with garbage collection policy applied
+func (c *Compactor) mergeWithGC(ctx context.Context, mr *sstable.MergeReader, ch chan<- *types.Record, gcPolicy *api.GCPolicy) error {
+	now := c.clock.Now()
+	versionCount := make(map[string]int)
+	
+	for {
+		rec, err := mr.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("MergeReader.Next: %w", err)
+		}
+		
+		// Apply GC policy to decide whether to keep this record
+		if c.shouldKeepRecord(rec, gcPolicy, now, versionCount) {
+			select {
+			case ch <- rec:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return nil
+}
+
+// shouldKeepRecord determines if a record should be kept based on GC policy
+func (c *Compactor) shouldKeepRecord(rec *types.Record, policy *api.GCPolicy, now time.Time, versionCount map[string]int) bool {
+	// Check age limits
+	if policy.MaxAge > 0 && now.Sub(rec.Timestamp) > policy.MaxAge {
+		return false
+	}
+	
+	// Check tombstone age limits
+	if rec.Tombstone && policy.TombstoneGCAge > 0 && now.Sub(rec.Timestamp) > policy.TombstoneGCAge {
+		return false
+	}
+	
+	// Check version limits
+	if policy.MaxVersions > 0 {
+		versionCount[rec.Key]++
+		if versionCount[rec.Key] > policy.MaxVersions {
+			return false
+		}
+	}
+	
+	return true
 }
