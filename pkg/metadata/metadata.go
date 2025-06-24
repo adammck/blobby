@@ -112,6 +112,57 @@ func (s *Store) Delete(ctx context.Context, meta *api.BlobMeta) error {
 	return nil
 }
 
+// AtomicSwap atomically replaces old metadata entries with a new one.
+// This is used for compaction to ensure metadata consistency.
+func (s *Store) AtomicSwap(ctx context.Context, newMeta *api.BlobMeta, oldMetas []*api.BlobMeta) error {
+	db, err := s.getMongo(ctx)
+	if err != nil {
+		return fmt.Errorf("getMongo: %w", err)
+	}
+
+	// Use MongoDB transaction for atomic metadata swap
+	callback := func(sessCtx mongo.SessionContext) (interface{}, error) {
+		coll := db.Collection(sstablesCollection)
+
+		// Insert new metadata
+		_, err := coll.InsertOne(sessCtx, newMeta)
+		if err != nil {
+			return nil, fmt.Errorf("insert new meta: %w", err)
+		}
+
+		// Delete old metadata entries
+		for i, oldMeta := range oldMetas {
+			result, err := coll.DeleteOne(sessCtx, bson.M{
+				"created": oldMeta.Created,
+				"min_key": oldMeta.MinKey,
+				"max_key": oldMeta.MaxKey,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("delete old meta %d: %w", i, err)
+			}
+			if result.DeletedCount != 1 {
+				return nil, fmt.Errorf("expected to delete 1 record for meta %d, deleted %d", i, result.DeletedCount)
+			}
+		}
+
+		return nil, nil
+	}
+
+	// Execute transaction with retries
+	session, err := db.Client().StartSession()
+	if err != nil {
+		return fmt.Errorf("start session: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, callback)
+	if err != nil {
+		return fmt.Errorf("transaction failed: %w", err)
+	}
+
+	return nil
+}
+
 func (s *Store) GetContaining(ctx context.Context, key string) ([]*api.BlobMeta, error) {
 	db, err := s.getMongo(ctx)
 	if err != nil {

@@ -122,65 +122,8 @@ func (c *Compactor) Compact(ctx context.Context, cc *Compaction) *api.Compaction
 
 	stats.Outputs = []*api.BlobMeta{meta}
 
-	// TODO: Do the inserts and deletes transactionally!
-
-	err = c.md.Insert(ctx, meta)
-	if err != nil {
-		return &api.CompactionStats{
-			Error: fmt.Errorf("metadata.Insert: %w", err),
-		}
-	}
-
-	err = c.ixs.Put(ctx, meta.Filename(), idx)
-	if err != nil {
-		return &api.CompactionStats{
-			Error: fmt.Errorf("IndexStore.Put: %w", err),
-		}
-	}
-
-	// marshal the filter here. not sure why!
-	fi, err := f.Marshal()
-	if err != nil {
-		// TODO: roll back everything, or maybe do this above.
-		return &api.CompactionStats{
-			Error: fmt.Errorf("Filter.Marshal: %w", err),
-		}
-	}
-
-	// write the filter using a filterstore
-	err = c.fs.Put(ctx, meta.Filename(), fi)
-	if err != nil {
-		// TODO: roll back metadata insert
-		return &api.CompactionStats{
-			Error: fmt.Errorf("FilterStore.Put: %w", err),
-		}
-	}
-
-	// delete the input files from the metadata store, so they're no longer
-	// returned for queries, before removing the actual files.
-
-	for i, m := range cc.Inputs {
-		err = c.md.Delete(ctx, m)
-		if err != nil {
-			return &api.CompactionStats{
-				// TODO: include the metadata ID in this error.
-				Error: fmt.Errorf("metadata.Delete(%d): %w", i, err),
-			}
-		}
-	}
-
-	// delete the blobs.
-
-	for _, m := range cc.Inputs {
-		err := c.sstm.Delete(ctx, m.Filename())
-		if err != nil {
-			return &api.CompactionStats{
-				Error: fmt.Errorf("blobstore.Delete(%s): %w", m.Filename(), err),
-			}
-		}
-	}
-
-	return stats
+	// Use atomic compaction to ensure consistency
+	return c.compactWithRollback(ctx, cc, meta, idx, f)
 }
 
 type Compaction struct {
@@ -262,4 +205,58 @@ func (c *Compactor) GetCompactions(metas []*api.BlobMeta, opts api.CompactionOpt
 	}
 
 	return []*Compaction{r}
+}
+
+// compactWithRollback performs atomic compaction with rollback capability
+func (c *Compactor) compactWithRollback(ctx context.Context, cc *Compaction, meta *api.BlobMeta, idx []api.IndexEntry, f filter.Filter) *api.CompactionStats {
+	// Phase 1: Prepare all data (can be retried if fails)
+	fi, err := f.Marshal()
+	if err != nil {
+		return &api.CompactionStats{
+			Error: fmt.Errorf("Filter.Marshal: %w", err),
+		}
+	}
+
+	// Phase 2: Write index and filter (idempotent operations)
+	err = c.ixs.Put(ctx, meta.Filename(), idx)
+	if err != nil {
+		return &api.CompactionStats{
+			Error: fmt.Errorf("IndexStore.Put: %w", err),
+		}
+	}
+
+	err = c.fs.Put(ctx, meta.Filename(), fi)
+	if err != nil {
+		// Clean up index
+		c.ixs.Delete(ctx, meta.Filename()) // Best effort cleanup
+		return &api.CompactionStats{
+			Error: fmt.Errorf("FilterStore.Put: %w", err),
+		}
+	}
+
+	// Phase 3: Atomic metadata swap using MongoDB transaction
+	err = c.md.AtomicSwap(ctx, meta, cc.Inputs)
+	if err != nil {
+		// Rollback: clean up index and filter
+		c.ixs.Delete(ctx, meta.Filename()) // Best effort cleanup
+		c.fs.Delete(ctx, meta.Filename()) // Best effort cleanup
+		return &api.CompactionStats{
+			Error: fmt.Errorf("atomic metadata swap: %w", err),
+		}
+	}
+
+	// Phase 4: Clean up old blobs (safe to fail - metadata already updated)
+	for _, m := range cc.Inputs {
+		err := c.sstm.Delete(ctx, m.Filename())
+		if err != nil {
+			// Log error but don't fail compaction - metadata is already consistent
+			// In production, this should be logged for manual cleanup
+			fmt.Printf("Warning: failed to delete old blob %s: %v\n", m.Filename(), err)
+		}
+	}
+
+	return &api.CompactionStats{
+		Inputs:  cc.Inputs,
+		Outputs: []*api.BlobMeta{meta},
+	}
 }

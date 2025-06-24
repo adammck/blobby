@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/adammck/blobby/pkg/api"
+	"github.com/adammck/blobby/pkg/memtable"
 	"github.com/adammck/blobby/pkg/sstable"
 	"github.com/adammck/blobby/pkg/testdeps"
 	"github.com/jonboulle/clockwork"
@@ -28,6 +29,92 @@ func setup(t *testing.T, clock clockwork.Clock) (context.Context, *testdeps.Env,
 	require.NoError(t, err)
 
 	return ctx, env, b
+}
+
+func TestMemtableDropRace(t *testing.T) {
+	ctx := context.Background()
+	c := clockwork.NewFakeClock()
+	_, _, b := setup(t, c)
+
+	// Create data and flush to create a flushed memtable
+	c.Advance(1 * time.Second)
+	_, err := b.Put(ctx, "key1", []byte("value1"))
+	require.NoError(t, err)
+	
+	c.Advance(1 * time.Hour) 
+	stats, err := b.Flush(ctx)
+	require.NoError(t, err)
+	oldMemtable := stats.FlushedMemtable
+
+	// Simulate a scan that holds reference
+	handle, err := b.mt.GetHandle(ctx, oldMemtable)
+	require.NoError(t, err)
+	handle.AddRef()
+
+	// Try to drop - should fail due to active reference
+	err = b.mt.TryDrop(ctx, oldMemtable)
+	require.Error(t, err)
+	require.ErrorIs(t, err, memtable.ErrStillReferenced)
+
+	// Release reference
+	handle.Release()
+
+	// Now drop should succeed
+	err = b.mt.TryDrop(ctx, oldMemtable)
+	require.NoError(t, err)
+}
+
+func TestGetMultiVersionBug(t *testing.T) {
+	ctx := context.Background()
+	c := clockwork.NewFakeClock()
+	_, _, b := setup(t, c)
+
+	// Create a simple scenario where we have multiple SSTables with the same key
+	// but different timestamps, simulating the state after compaction
+
+	// Write v1 with early timestamp and flush
+	c.Advance(1 * time.Second)
+	_, err := b.Put(ctx, "key1", []byte("v1"))
+	require.NoError(t, err)
+	_, err = b.Put(ctx, "a", []byte("data1"))  // Different keys to ensure proper ordering
+	require.NoError(t, err)
+	_, err = b.Flush(ctx)
+	require.NoError(t, err)
+
+	// Write v2 with middle timestamp and flush  
+	c.Advance(1 * time.Hour)
+	_, err = b.Put(ctx, "key1", []byte("v2"))
+	require.NoError(t, err)
+	_, err = b.Put(ctx, "b", []byte("data2"))
+	require.NoError(t, err)
+	_, err = b.Flush(ctx)
+	require.NoError(t, err)
+
+	// Write v3 with latest timestamp and flush
+	c.Advance(1 * time.Hour)
+	_, err = b.Put(ctx, "key1", []byte("v3"))
+	require.NoError(t, err)
+	_, err = b.Put(ctx, "c", []byte("data3"))
+	require.NoError(t, err)
+	_, err = b.Flush(ctx)
+	require.NoError(t, err)
+
+	// Check sstable metadata ordering
+	metas, err := b.md.GetContaining(ctx, "key1")
+	require.NoError(t, err)
+	t.Logf("SSTables containing key1: %d", len(metas))
+	for i, meta := range metas {
+		t.Logf("  SSTable %d: %s, minTime=%v, maxTime=%v", i+1, meta.Filename(), meta.MinTime, meta.MaxTime)
+	}
+
+	// The bug: Get() should return v3 (newest timestamp) but our current implementation 
+	// returns the first match it finds, which might not be the newest due to metadata ordering
+	val, getStats, err := b.Get(ctx, "key1")
+	require.NoError(t, err)
+	t.Logf("Get returned value=%s from source=%s", string(val), getStats.Source)
+	
+	// This should pass now that we fixed the Get() method to find the newest timestamp
+	require.Equal(t, []byte("v3"), val)
 }
 
 func TestBasicWriteRead(t *testing.T) {
@@ -217,16 +304,15 @@ func TestBasicWriteRead(t *testing.T) {
 	//  - [011, 020]
 	//  - [003, 013]
 
-	// fetch a key which we know is in the newest sstable. note that we only
-	// need to fetch one sstable, because we start at the newest one, and that
-	// we only need to scan through a single record, since not all keys are
-	// present.
+	// fetch a key which exists in multiple sstables. Our fixed Get() method
+	// now correctly scans all candidate sstables to find the newest version.
+	// Key "003" exists in both the original sstable [001, 010] and the newer one [003, 013].
 	val, gstats = tb.get("003")
 	require.Equal(t, val, []byte("xxx"))
 	require.Equal(t, &api.GetStats{
 		Source:         t4.sstable,
-		BlobsFetched:   1, // <--
-		RecordsScanned: 1,
+		BlobsFetched:   2, // Now fetches both candidate sstables
+		RecordsScanned: 4, // Scans records in both sstables
 	}, gstats)
 
 	// now fetch a key which is in the oldest sstable, and outside of the key

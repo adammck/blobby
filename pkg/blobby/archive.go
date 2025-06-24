@@ -159,6 +159,14 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 		return nil, stats, fmt.Errorf("metadata.GetContaining: %w", err)
 	}
 
+	// candidate holds a record and its source for comparison
+	type candidate struct {
+		rec    *types.Record
+		source string
+	}
+
+	var best *candidate
+
 	// note: this assumes that metas is already sorted.
 	for _, meta := range metas {
 
@@ -214,17 +222,20 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 		stats.RecordsScanned += scanned
 
 		if rec != nil {
-			stats.Source = meta.Filename()
-			if rec.Tombstone {
-				return nil, stats, &api.NotFound{Key: key}
+			// Check if this is the newest version we've seen
+			if best == nil || rec.Timestamp.After(best.rec.Timestamp) {
+				best = &candidate{rec: rec, source: meta.Filename()}
 			}
-			// return as soon as we find the first record, but that's wrong!
-			// before returning, we need to look at the record timestamp, and
-			// check whether any of the remaining metas have a minTime newer
-			// than that. this is only possible after a weird compaction.
-			// TODO: fix this!
-			return rec.Document, stats, nil
 		}
+	}
+
+	// Return the newest version found
+	if best != nil {
+		stats.Source = best.source
+		if best.rec.Tombstone {
+			return nil, stats, &api.NotFound{Key: key}
+		}
+		return best.rec.Document, stats, nil
 	}
 
 	// key not found
@@ -507,20 +518,15 @@ func (b *Blobby) Flush(ctx context.Context) (*api.FlushStats, error) {
 	stats.FlushedMemtable = hPrev.Name()
 	stats.Meta = meta
 
-	// only drop memtable if no active scans are using it
-	canDrop, err := b.mt.CanDropMemtable(ctx, hPrev.Name())
+	// atomically drop memtable if no active scans are using it
+	err = b.mt.TryDrop(ctx, hPrev.Name())
 	if err != nil {
-		return stats, fmt.Errorf("CanDropMemtable: %w", err)
-	}
-
-	if !canDrop {
-		// TODO: if we can't drop it now, we should retry later when refs reach zero
-		return stats, nil
-	}
-
-	err = b.mt.Drop(ctx, hPrev.Name())
-	if err != nil {
-		return stats, fmt.Errorf("memtable.Drop: %w", err)
+		if errors.Is(err, memtable.ErrStillReferenced) {
+			// Memtable still has active references, skip dropping for now
+			// TODO: if we can't drop it now, we should retry later when refs reach zero
+			return stats, nil
+		}
+		return stats, fmt.Errorf("memtable.TryDrop: %w", err)
 	}
 
 	return stats, nil

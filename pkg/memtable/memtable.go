@@ -328,6 +328,57 @@ func (mt *Memtable) Drop(ctx context.Context, name string) error {
 	return nil
 }
 
+// ErrStillReferenced is returned when attempting to drop a memtable that still has active references
+var ErrStillReferenced = fmt.Errorf("memtable still has active references")
+
+// TryDrop atomically checks if a memtable can be dropped and drops it if safe.
+// This prevents the race condition between CanDropMemtable and Drop.
+func (mt *Memtable) TryDrop(ctx context.Context, name string) error {
+	mt.handlesMu.Lock()
+	defer mt.handlesMu.Unlock()
+
+	handle, exists := mt.handles[name]
+	if !exists {
+		// Handle doesn't exist, memtable probably already dropped
+		return nil
+	}
+
+	// Atomic check-and-drop under lock
+	if !handle.CanDrop() {
+		return ErrStillReferenced
+	}
+
+	// Drop while holding lock to prevent new references
+	err := mt.dropLocked(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	// Remove from handle registry
+	delete(mt.handles, name)
+	return nil
+}
+
+// dropLocked performs the actual drop operation. Must be called with handlesMu held.
+func (mt *Memtable) dropLocked(ctx context.Context, name string) error {
+	db, err := mt.GetMongo(ctx)
+	if err != nil {
+		return fmt.Errorf("GetMongo: %w", err)
+	}
+
+	err = db.Collection(name).Drop(ctx)
+	if err != nil {
+		return fmt.Errorf("Drop: %w", err)
+	}
+
+	_, err = db.Collection(memtablesCollection).DeleteOne(ctx, bson.M{"_id": name})
+	if err != nil {
+		return fmt.Errorf("DeleteOne: %w", err)
+	}
+
+	return nil
+}
+
 // Scan returns an iterator for all records in the memtable within the key range
 func (mt *Memtable) Scan(ctx context.Context, collName, start, end string) (api.Iterator, error) {
 	db, err := mt.GetMongo(ctx)
