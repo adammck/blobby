@@ -128,7 +128,7 @@ Records (`pkg/types/types.go`) use BSON encoding with:
 
 ### Behavior
 
-- Always use the search tool instead of running grep or rg.
+- IMPORTANT: Use the search tool instead of running grep or rg. Do NOT shell out to search!
 
 ### Code Style
 - Use early return patterns instead of nested conditionals
