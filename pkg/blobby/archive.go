@@ -14,7 +14,7 @@ import (
 	mindexstore "github.com/adammck/blobby/pkg/impl/indexstore/mongo"
 	"github.com/adammck/blobby/pkg/index"
 	"github.com/adammck/blobby/pkg/iterator"
-	"github.com/adammck/blobby/pkg/lru"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/adammck/blobby/pkg/memtable"
 	"github.com/adammck/blobby/pkg/metadata"
 	sharedmongo "github.com/adammck/blobby/pkg/shared/mongo"
@@ -51,8 +51,8 @@ type Blobby struct {
 	comp  *compactor.Compactor
 
 	// LRU caches for indexes and filters
-	indexCache  *lru.Cache
-	filterCache *lru.Cache
+	indexCache  *lru.Cache[string, *index.Index]
+	filterCache *lru.Cache[string, filter.Filter]
 	
 	// Concurrency limits to prevent resource exhaustion
 	flushSem   *semaphore.Weighted
@@ -61,6 +61,15 @@ type Blobby struct {
 }
 
 var _ api.Blobby = (*Blobby)(nil)
+
+// mustNewLRU creates a new LRU cache and panics on error (which should never happen)
+func mustNewLRU[K comparable, V any](size int) *lru.Cache[K, V] {
+	cache, err := lru.New[K, V](size)
+	if err != nil {
+		panic(fmt.Errorf("failed to create LRU cache: %w", err))
+	}
+	return cache
+}
 
 // scanResources manages the lifecycle of resources used during scan operations.
 // This provides explicit cleanup semantics instead of relying on complex
@@ -151,8 +160,8 @@ func New(ctx context.Context, mongoURL, bucket string, clock clockwork.Clock, sf
 		clock: clock,
 		comp:  compactor.New(clock, sstm, md, ixs, fs),
 
-		indexCache:  lru.New(defaultIndexCacheSize),
-		filterCache: lru.New(defaultFilterCacheSize),
+		indexCache:  mustNewLRU[string, *index.Index](defaultIndexCacheSize),
+		filterCache: mustNewLRU[string, filter.Filter](defaultFilterCacheSize),
 		
 		flushSem:   semaphore.NewWeighted(defaultMaxConcurrentFlushes),
 		compactSem: semaphore.NewWeighted(defaultMaxConcurrentCompactions),
@@ -333,7 +342,7 @@ func (b *Blobby) Get(ctx context.Context, key string) (value []byte, stats *api.
 func (b *Blobby) getIndex(ctx context.Context, fn string) (*index.Index, error) {
 	// Check cache first
 	if cached, found := b.indexCache.Get(fn); found {
-		return cached.(*index.Index), nil
+		return cached, nil
 	}
 
 	// Load from store
@@ -343,7 +352,7 @@ func (b *Blobby) getIndex(ctx context.Context, fn string) (*index.Index, error) 
 	}
 
 	ix := index.New(ixs)
-	b.indexCache.Put(fn, ix)
+	b.indexCache.Add(fn, ix)
 	return ix, nil
 }
 
@@ -352,7 +361,7 @@ func (b *Blobby) getIndex(ctx context.Context, fn string) (*index.Index, error) 
 func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error) {
 	// Check cache first
 	if cached, found := b.filterCache.Get(fn); found {
-		return cached.(filter.Filter), nil
+		return cached, nil
 	}
 
 	// Load from store
@@ -366,7 +375,7 @@ func (b *Blobby) getFilter(ctx context.Context, fn string) (filter.Filter, error
 		return nil, err
 	}
 
-	b.filterCache.Put(fn, f)
+	b.filterCache.Add(fn, f)
 	return f, nil
 }
 
